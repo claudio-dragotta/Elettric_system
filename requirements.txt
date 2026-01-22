@@ -1,0 +1,9 @@
+cvxpy
+ecos
+pulp
+numpy
+pandas
+scipy
+pyyaml
+matplotlib
+tqdm

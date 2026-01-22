@@ -1,0 +1,34 @@
+project:
+  timestep_h: 1
+  horizon_h: 24
+  start_hour: 0
+  use_full_year: false  # false = intersect with load hours
+  year: 2022
+
+system:
+  pv_nom_mw: 4.0
+  wind_nom_mw: 11.34
+  load_nom_mw: 20.0
+  load_nom_mw_values: [16.0, 20.0]
+  load_scale: 1.0    # used when load_scale_mode=fixed
+  load_scale_mode: max_to_nominal  # fixed|max_to_nominal
+  import_max_mw: 20.0
+  export_max_mw: 16.0
+  ely_nom_mw: 7.0
+  ely_min_mw: 0.7
+  eta_ely: 0.7
+  fc_nom_mw: 7.0
+  fc_min_mw: 0.7
+  eta_fc: 0.6
+  h2_storage_mwh: 12.0
+  dg_nom_mw: 5.0
+  dg_min_mw: 1.0
+  eta_dg: 0.6
+
+prices:
+  import_f1_eur_per_kwh: 0.53276
+  import_f2_eur_per_kwh: 0.54858
+  import_f3_eur_per_kwh: 0.46868
+  fuel_eur_per_kwh: 0.45
+  fuel_alt_eur_per_kwh: 0.60
+  use_import_tariff_schedule: true

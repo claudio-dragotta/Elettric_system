@@ -38,6 +38,7 @@ def _solve_with_pulp(
 
     sys = cfg['system']
     horizon_h = len(load)
+    eta_dg = float(sys.get('eta_dg', 0.6))
 
     prob = pulp.LpProblem('mpc', pulp.LpMinimize)
 
@@ -80,7 +81,7 @@ def _solve_with_pulp(
     objective = (
         pulp.lpSum(import_price[t] * p_import[t] * dt for t in range(horizon_h))
         - pulp.lpSum(export_price[t] * p_export[t] * dt for t in range(horizon_h))
-        + pulp.lpSum(fuel_price * p_dg[t] * dt for t in range(horizon_h))
+        + pulp.lpSum((fuel_price / eta_dg) * p_dg[t] * dt for t in range(horizon_h))
         + pulp.lpSum(curtail_penalty * p_curt[t] * dt for t in range(horizon_h))
     )
     prob += objective
@@ -112,6 +113,11 @@ def solve_horizon(
     soc_init_mwh: float = 0.0,
     fuel_eur_per_kwh: float | None = None,
 ) -> MPCResult:
+    """Solve MPC for a single horizon window.
+
+    Args:
+        fuel_eur_per_kwh: Fuel cost in EUR/kWh. If None, uses config value.
+    """
     dt = float(cfg['project']['timestep_h'])
 
     sys = cfg['system']
@@ -188,10 +194,11 @@ def solve_horizon(
     ]
 
     curtail_penalty = 1.0
+    eta_dg = float(sys.get('eta_dg', 0.6))
 
     cost = cp.sum(cp.multiply(import_price, p_import) * dt)
     cost -= cp.sum(cp.multiply(export_price, p_export) * dt)
-    cost += cp.sum(cp.multiply(fuel_price, p_dg) * dt)
+    cost += cp.sum(cp.multiply(fuel_price / eta_dg, p_dg) * dt)
     cost += curtail_penalty * cp.sum(p_curt * dt)
 
     problem = cp.Problem(cp.Minimize(cost), constraints)

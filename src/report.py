@@ -16,10 +16,17 @@ def _safe_sum(series: pd.Series) -> float:
     return float(series.fillna(0.0).sum())
 
 
-def build_report(df: pd.DataFrame, schedule: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+def build_report(
+    df: pd.DataFrame,
+    schedule: pd.DataFrame,
+    cfg: dict,
+    fuel_eur_per_kwh: float | None = None,
+) -> pd.DataFrame:
     dt = float(cfg['project']['timestep_h'])
-    fuel_eur_per_kwh = float(cfg['prices']['fuel_eur_per_kwh'])
+    if fuel_eur_per_kwh is None:
+        fuel_eur_per_kwh = float(cfg['prices']['fuel_eur_per_kwh'])
     fuel_price = fuel_eur_per_kwh * 1000.0
+    eta_dg = float(cfg['system'].get('eta_dg', 0.6))
 
     merged = df.join(schedule, how='inner')
 
@@ -42,7 +49,7 @@ def build_report(df: pd.DataFrame, schedule: pd.DataFrame, cfg: dict) -> pd.Data
     metrics['income_export_eur'] = _safe_sum(
         merged['p_export_mw'] * merged['pun_eur_per_mwh'] * dt
     )
-    metrics['cost_dg_eur'] = _safe_sum(merged['p_dg_mw'] * fuel_price * dt)
+    metrics['cost_dg_eur'] = _safe_sum(merged['p_dg_mw'] * (fuel_price / eta_dg) * dt)
     metrics['net_cost_eur'] = (
         metrics['cost_import_eur'] - metrics['income_export_eur'] + metrics['cost_dg_eur']
     )
@@ -114,10 +121,14 @@ def main() -> None:
     parser.add_argument('--config', default='configs/system.yaml')
     parser.add_argument('--schedule', default='outputs/mpc_receding.csv')
     parser.add_argument('--out', default='outputs/report.csv')
+    parser.add_argument('--fuel-cost', type=float, default=None, help='Fuel cost EUR/kWh')
+    parser.add_argument('--load-nom', type=float, default=None, help='Load nominal MW for scaling')
     parser.add_argument('--plots', action='store_true', help='Generate plots in outputs/plots')
     args = parser.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text(encoding='ascii'))
+    if args.load_nom is not None:
+        cfg['system']['load_nom_mw'] = args.load_nom
     bundle = load_timeseries(Path('data'), cfg)
     df = add_net_load(bundle.data)
 
@@ -125,7 +136,7 @@ def main() -> None:
     if 'hour' in schedule.columns:
         schedule = schedule.set_index('hour')
 
-    report = build_report(df, schedule, cfg)
+    report = build_report(df, schedule, cfg, fuel_eur_per_kwh=args.fuel_cost)
     save_report(report, Path(args.out))
     print(f'wrote {args.out}')
 

@@ -9,7 +9,6 @@ system:
   pv_nom_mw: 4.0
   wind_nom_mw: 11.34
   load_nom_mw: 20.0
-  load_nom_mw_values: [16.0, 20.0]
   load_scale: 1.0    # used when load_scale_mode=fixed
   load_scale_mode: max_to_nominal  # fixed|max_to_nominal
   import_max_mw: 20.0

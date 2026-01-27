@@ -28,7 +28,7 @@ Progettare un sistema di ottimizzazione/controllo (MPC - Model Predictive Contro
 |------------|-----------|--------|-------|
 | **Fotovoltaico (PV)** | Potenza nominale | 4.0 | MW |
 | **Eolico (Wind)** | Potenza nominale | 11.34 | MW |
-| **Carico (Pul)** | Potenza nominale | 16 / 20 | MW |
+| **Carico (Pul)** | Potenza nominale | 20 | MW |
 | **Rete - Import** | Potenza massima | 20.0 | MW |
 | **Rete - Export** | Potenza massima | 16.0 | MW |
 | **Elettrolizzatore (ELY)** | Potenza nominale | 7.0 | MW |
@@ -44,9 +44,61 @@ Progettare un sistema di ottimizzazione/controllo (MPC - Model Predictive Contro
 
 ---
 
-## 3. Prezzi e tariffe utilizzati
+## 3. Metodologia: MPC Rolling Horizon
 
-### 3.1 Costo energia importata (tariffe ARERA)
+### 3.1 Cos'e il Model Predictive Control (MPC)
+
+Il MPC e una strategia di controllo che ripete ciclicamente 4 step:
+
+```
+STEP 1: Raccogli previsioni (PV, Wind, Load, Prezzi) per le prossime 24 ore
+           |
+           v
+STEP 2: Risolvi il problema di ottimizzazione MILP sull'orizzonte di 24h
+           |
+           v
+STEP 3: Applica SOLO la prima decisione (ora corrente)
+           |
+           v
+STEP 4: Avanza di 1 ora e torna a STEP 1
+```
+
+### 3.2 Perche MILP e non LP?
+
+Il modello usa **MILP (Mixed Integer Linear Programming)** invece di LP puro per rispettare i vincoli di potenza minima:
+
+| Componente | Vincolo | Comportamento |
+|------------|---------|---------------|
+| ELY | P_min = 0.7 MW | O spento (0 MW) O acceso (0.7-7 MW) |
+| FC | P_min = 0.7 MW | O spenta (0 MW) O accesa (0.7-7 MW) |
+| DG | P_min = 1.0 MW | O spento (0 MW) O acceso (1-5 MW) |
+
+Le variabili binarie (u_ely, u_fc, u_dg) permettono di modellare correttamente questo comportamento on/off.
+
+### 3.3 Bilancio energetico
+
+Il vincolo fondamentale e che **tutta l'energia IN = tutta l'energia OUT**:
+
+```
+ENERGIA IN                      ENERGIA OUT
+-----------                     -----------
+P_pv                            P_load
+P_wind          ===             P_export
+P_import                        P_ely
+P_dg                            P_curtail
+P_fc
+```
+
+Formula:
+```
+P_pv + P_wind + P_import + P_dg + P_fc = P_load + P_export + P_ely + P_curt
+```
+
+---
+
+## 4. Prezzi e tariffe utilizzati
+
+### 4.1 Costo energia importata (tariffe ARERA)
 
 | Fascia | Orario | Prezzo (EUR/kWh) | Prezzo (EUR/MWh) |
 |--------|--------|------------------|------------------|
@@ -55,340 +107,690 @@ Progettare un sistema di ottimizzazione/controllo (MPC - Model Predictive Contro
 | **F3** | Notti, domeniche, festivita | 0.46868 | 468.68 |
 | **Media ponderata** | - | ~0.515 | ~515 |
 
-### 3.2 Prezzo energia esportata
+### 4.2 Prezzo energia esportata (PUN)
 
-- **PUN 2022**: Prezzo Unico Nazionale, varia ora per ora (dati da PUN_2022.mat)
-- Media annuale PUN 2022: ~250-300 EUR/MWh
+- **PUN 2022**: Prezzo Unico Nazionale, varia ora per ora
+- Range: 10 - 870 EUR/MWh
+- Media annuale: ~324 EUR/MWh
 
-### 3.3 Costo carburante DG (scenari testati)
+### 4.3 Costo carburante DG (scenari testati)
 
-| Scenario | Costo carburante (EUR/kWh) | Costo elettrico effettivo* (EUR/kWh) | Costo elettrico (EUR/MWh) |
-|----------|----------------------------|--------------------------------------|---------------------------|
-| **cf = 0.45** | 0.45 | 0.75 | 750 |
-| **cf = 0.60** | 0.60 | 1.00 | 1000 |
+| Scenario | Costo carburante | Costo elettrico* | Confronto con rete |
+|----------|------------------|------------------|-------------------|
+| **cf = 0.45** | 0.45 EUR/kWh | 750 EUR/MWh | +46% vs import |
+| **cf = 0.60** | 0.60 EUR/kWh | 1000 EUR/MWh | +94% vs import |
 
-*Nota: Costo elettrico effettivo = costo_carburante / efficienza_DG = cf / 0.6
-
----
-
-## 4. Strategia di controllo ottimale
-
-### 4.1 Logica decisionale del MPC
-
-1. **Priorita alle rinnovabili**: PV e Wind hanno costo marginale nullo, quindi vengono sempre utilizzati al massimo.
-
-2. **Gestione del surplus energetico** (quando Pres > Pul):
-   - Prima opzione: caricare lo storage H2 con l'elettrolizzatore
-   - Seconda opzione: esportare in rete (se il prezzo PUN e conveniente)
-   - Ultima opzione: curtailment (solo se necessario)
-
-3. **Gestione del deficit energetico** (quando Pres < Pul):
-   - Prima opzione: usare la fuel cell (se c'e H2 disponibile)
-   - Seconda opzione: importare dalla rete
-   - Terza opzione: usare il DG (solo se economicamente conveniente)
-
-### 4.2 Quando conviene usare il DG?
-
-**Confronto economico diretto:**
-
-| Fonte | Costo (EUR/MWh) | Convenienza |
-|-------|-----------------|-------------|
-| Import rete (media) | ~515 | Riferimento |
-| DG con cf=0.45 | 750 | 46% piu costoso della rete |
-| DG con cf=0.60 | 1000 | 94% piu costoso della rete |
-
-**Conclusione:** Il DG e quasi sempre piu costoso dell'import dalla rete. Viene utilizzato solo quando:
-- L'import dalla rete e al massimo (20 MW) E
-- Lo storage H2 e vuoto E
-- Il carico deve comunque essere soddisfatto
+*Costo elettrico = costo_carburante / efficienza_DG = cf / 0.6
 
 ---
 
-## 5. Risultati delle simulazioni
+## 5. Strategia di controllo ottimale: decisioni ora per ora
 
-### 5.1 Panoramica scenari testati
+### 5.1 Logica decisionale
 
-Sono stati simulati **4 scenari** come richiesto dalle specifiche:
-- 2 livelli di carico nominale: **16 MW** e **20 MW**
-- 2 valori di costo carburante: **0.45 EUR/kWh** e **0.60 EUR/kWh**
+Per ogni ora, il sistema decide la configurazione ottimale seguendo questa logica:
 
-Periodo di simulazione: **6528 ore** (limitato dalla disponibilita dei dati di carico)
-
-### 5.2 Tabella riassuntiva completa
-
-| Voce | 16MW cf=0.45 | 16MW cf=0.60 | 20MW cf=0.45 | 20MW cf=0.60 |
-|------|-------------:|-------------:|-------------:|-------------:|
-| **ENERGIA** |||||
-| Energia carico (MWh) | 38,120.63 | 38,120.63 | 47,650.79 | 47,650.79 |
-| Energia PV (MWh) | 5,434.80 | 5,434.80 | 5,434.80 | 5,434.80 |
-| Energia Wind (MWh) | 6,411.43 | 6,411.43 | 6,411.43 | 6,411.43 |
-| Energia Import (MWh) | 37,624.10 | 37,622.84 | 46,050.71 | 46,052.37 |
-| Energia Export (MWh) | 11,157.17 | 11,072.03 | 10,127.95 | 10,003.06 |
-| Energia DG (MWh) | 81.87 | ~0 | 128.76 | ~0 |
-| **SISTEMA H2** |||||
-| Energia ELY (MWh elettrici) | 198.02 | 201.48 | 119.40 | 115.58 |
-| Energia FC (MWh elettrici) | 83.17 | 84.62 | 50.15 | 48.54 |
-| H2 prodotto (MWh) | 138.62 | 141.04 | 83.58 | 80.91 |
-| Cicli equivalenti storage | 11.55 | 11.75 | 6.97 | 6.74 |
-| **COSTI** |||||
-| Costo Import (EUR) | 19,131,707 | 19,131,034 | 23,417,554 | 23,418,483 |
-| Ricavo Export (EUR) | 6,533,009 | 6,467,318 | 5,986,768 | 5,885,006 |
-| Costo DG (EUR) | 61,406 | ~0 | 96,566 | ~0 |
-| **Costo netto (EUR)** | **12,660,104** | **12,663,717** | **17,527,353** | **17,533,477** |
-| **METRICHE** |||||
-| Costo per MWh carico (EUR/MWh) | 332.11 | 332.21 | 367.85 | 367.98 |
-| % Autoconsumo rinnovabili | 31.1% | 31.1% | 24.9% | 24.9% |
-
-### 5.3 Breakdown dei costi per scenario
-
-#### Scenario 16 MW, cf=0.45 EUR/kWh
 ```
-Costo Import:      +19,131,707 EUR (100.5%)
-Costo DG:              +61,406 EUR   (0.3%)
-Ricavo Export:      -6,533,009 EUR (-34.3%)
-─────────────────────────────────────────────
-COSTO NETTO:       12,660,104 EUR
+                    +------------------+
+                    |  Calcola deficit |
+                    |  o surplus RES   |
+                    +--------+---------+
+                             |
+              +--------------+--------------+
+              |                             |
+        SURPLUS (RES > Load)          DEFICIT (RES < Load)
+              |                             |
+    +---------+---------+         +---------+---------+
+    |                   |         |                   |
+    v                   v         v                   v
+Export a PUN?     Carica H2?   Scarica H2?      Import rete?
+(se PUN alto)     (se SOC<max) (se SOC>0)       (se <20MW)
+    |                   |         |                   |
+    +-------------------+         +-------------------+
+              |                             |
+              v                             v
+    Se ancora surplus:              Se ancora deficit:
+    -> CURTAILMENT                  -> USA DG (se PUN>750)
 ```
 
-#### Scenario 16 MW, cf=0.60 EUR/kWh
+### 5.2 Arbitraggio sui prezzi
+
+Il sistema puo fare **arbitraggio** quando i prezzi lo permettono:
+
+**Esempio ora 5694 (cf=0.45):**
 ```
-Costo Import:      +19,131,034 EUR (100.5%)
-Costo DG:                   ~0 EUR   (0.0%)
-Ricavo Export:      -6,467,318 EUR (-34.0%)
-─────────────────────────────────────────────
-COSTO NETTO:       12,663,717 EUR
+Prezzi:
+  - Import ARERA: 468.68 EUR/MWh
+  - Export PUN:   769.12 EUR/MWh  (molto alto!)
+  - Costo DG:     750.00 EUR/MWh
+
+Decisione ottimale:
+  - Import:  20.00 MW (massimo)
+  - DG:       5.00 MW (massimo)
+  - Export:  14.46 MW
+  - Load:    10.87 MW
+
+Bilancio: 20 + 5 + 0.33(RES) = 10.87 + 14.46 = 25.33 MW  [OK]
+
+Profitto arbitraggio:
+  - Compro 20 MW a 468.68 = 9,374 EUR (costo)
+  - Vendo 14.46 MW a 769.12 = 11,122 EUR (ricavo)
+  - DG 5 MW a 750 = 3,750 EUR (costo)
+  - Netto: 11,122 - 9,374 - 3,750 = -2,002 EUR
+
+Ma il sistema copre anche il carico di 10.87 MW!
 ```
 
-#### Scenario 20 MW, cf=0.45 EUR/kWh
+**Quando conviene usare il DG per arbitraggio:**
+```
+PUN > Costo_DG  =>  PUN > 750 EUR/MWh (cf=0.45)
+                    PUN > 1000 EUR/MWh (cf=0.60, mai raggiunto)
+```
+
+### 5.3 Strategie identificate
+
+Analisi delle 6528 ore simulate:
+
+| Strategia | cf=0.45 | cf=0.60 | Descrizione |
+|-----------|--------:|--------:|-------------|
+| IMPORT | 5438 | 5439 | Solo import dalla rete |
+| IMPORT+EXPORT | 680 | 719 | Import + export (arbitraggio base) |
+| EXPORT | 236 | 239 | Solo export (surplus RES) |
+| ELY | 56 | 52 | Carica storage H2 |
+| **IMPORT+EXPORT+DG** | **39** | **0** | Arbitraggio con DG |
+| RES | 35 | 35 | Solo rinnovabili |
+| IMPORT+FC | 34 | 33 | Scarica storage H2 |
+| Altre | 10 | 11 | Combinazioni varie |
+
+**Osservazione chiave:** Con cf=0.60 il DG non viene MAI usato (costo troppo alto).
+
+---
+
+## 6. Risultati delle simulazioni
+
+### 6.1 Riepilogo scenari
+
+Periodo simulato: **6528 ore** con MPC rolling horizon (orizzonte 24h)
+
+| Voce | cf=0.45 | cf=0.60 | Differenza |
+|------|--------:|--------:|------------|
+| **ENERGIA** ||||
+| Energia carico (MWh) | 47,650.79 | 47,650.79 | 0 |
+| Energia PV (MWh) | 5,434.80 | 5,434.80 | 0 |
+| Energia Wind (MWh) | 6,411.43 | 6,411.43 | 0 |
+| Energia Import (MWh) | 46,050.71 | 46,052.37 | +0.004% |
+| Energia Export (MWh) | 10,127.95 | 10,003.06 | -1.2% |
+| **Energia DG (MWh)** | **128.76** | **0.00** | **-100%** |
+| **SISTEMA H2** ||||
+| Energia ELY (MWh) | 119.40 | 115.58 | -3.2% |
+| Energia FC (MWh) | 50.15 | 48.54 | -3.2% |
+| H2 prodotto (MWh) | 83.58 | 80.91 | -3.2% |
+| **COSTI** ||||
+| Costo Import (EUR) | 23,417,554 | 23,418,483 | +0.004% |
+| Ricavo Export (EUR) | 5,986,768 | 5,885,006 | -1.7% |
+| Costo DG (EUR) | 96,566 | 0 | -100% |
+| **COSTO NETTO (EUR)** | **17,527,353** | **17,533,477** | **+0.03%** |
+
+### 6.2 Breakdown costi
+
+**cf=0.45:**
 ```
 Costo Import:      +23,417,554 EUR  (99.6%)
 Costo DG:              +96,566 EUR   (0.4%)
 Ricavo Export:      -5,986,768 EUR (-25.5%)
-─────────────────────────────────────────────
+---------------------------------------------
 COSTO NETTO:       17,527,353 EUR
+Costo per MWh:     367.83 EUR/MWh
 ```
 
-#### Scenario 20 MW, cf=0.60 EUR/kWh
+**cf=0.60:**
 ```
 Costo Import:      +23,418,483 EUR (100.0%)
-Costo DG:                   ~0 EUR   (0.0%)
+Costo DG:                    0 EUR   (0.0%)
 Ricavo Export:      -5,885,006 EUR (-25.1%)
-─────────────────────────────────────────────
+---------------------------------------------
 COSTO NETTO:       17,533,477 EUR
+Costo per MWh:     367.96 EUR/MWh
 ```
 
 ---
 
-## 6. Analisi economica dettagliata
+## 7. Analisi economica: quando conviene ogni componente
 
-### 6.1 Impatto del costo carburante sul DG
+### 7.1 Generatore Diesel (DG)
 
-| Metrica | cf=0.45 | cf=0.60 | Differenza |
-|---------|---------|---------|------------|
-| **Scenario 16 MW** ||||
-| Energia DG (MWh) | 81.87 | ~0 | -100% |
-| Costo DG (EUR) | 61,406 | ~0 | -100% |
-| Costo netto (EUR) | 12,660,104 | 12,663,717 | +3,613 (+0.03%) |
-| **Scenario 20 MW** ||||
-| Energia DG (MWh) | 128.76 | ~0 | -100% |
-| Costo DG (EUR) | 96,566 | ~0 | -100% |
-| Costo netto (EUR) | 17,527,353 | 17,533,477 | +6,124 (+0.03%) |
+| Condizione | cf=0.45 | cf=0.60 |
+|------------|---------|---------|
+| Costo DG | 750 EUR/MWh | 1000 EUR/MWh |
+| PUN max 2022 | 870 EUR/MWh | 870 EUR/MWh |
+| **Conviene arbitraggio?** | **Si, se PUN > 750** | **No, mai** |
+| Ore con DG attivo | 39 | 0 |
 
-**Osservazione chiave:** Quando il costo del carburante sale da 0.45 a 0.60 EUR/kWh:
-- Il DG non viene piu utilizzato (diventa troppo costoso)
-- Il sistema compensa importando piu energia dalla rete
-- Il costo netto aumenta solo dello 0.03% (~3,600-6,100 EUR)
+**Conclusione DG:**
+- Con cf=0.45: usato SOLO per arbitraggio quando PUN e molto alto (>750)
+- Con cf=0.60: MAI conveniente (costo 1000 > PUN max 870)
+- Il DG e marginale nel mix energetico (<0.3% dell'energia)
 
-**Questo dimostra che il DG e marginale nel mix energetico ottimale.**
+### 7.2 Sistema Idrogeno (ELY + FC)
 
-### 6.2 Impatto del livello di carico
+| Metrica | Valore |
+|---------|--------|
+| Efficienza ELY | 70% |
+| Efficienza FC | 60% |
+| **Efficienza round-trip** | **42%** |
+| Energia persa per ciclo | 58% |
 
-| Metrica | 16 MW | 20 MW | Differenza |
-|---------|-------|-------|------------|
-| Energia carico (MWh) | 38,121 | 47,651 | +25% |
-| Energia Import (MWh) | 37,624 | 46,051 | +22% |
-| Energia Export (MWh) | 11,157 | 10,128 | -9% |
-| Costo netto (EUR) | 12,660,104 | 17,527,353 | +38% |
-| Costo per MWh (EUR/MWh) | 332 | 368 | +11% |
+**Quando conviene usare H2:**
+```
+Carica (ELY): quando c'e surplus RES e SOC < 100%
+Scarica (FC): quando c'e deficit e SOC > 0% e Import al massimo
+```
 
-**Osservazione:** Con un carico maggiore:
-- Aumenta l'import dalla rete
-- Diminuisce l'export (piu energia consumata internamente)
-- Il costo per MWh servito aumenta dell'11%
+L'efficienza del 42% lo rende utile solo per:
+- Energy shifting (spostare energia nel tempo)
+- Evitare curtailment
+- NON per arbitraggio puro (troppe perdite)
 
-### 6.3 Ruolo del sistema a idrogeno
+### 7.3 Import/Export rete
 
-| Metrica | 16MW cf=0.45 | 20MW cf=0.45 |
-|---------|--------------|--------------|
-| Energia in ELY (MWh el.) | 198.02 | 119.40 |
-| Energia da FC (MWh el.) | 83.17 | 50.15 |
-| H2 prodotto (MWh) | 138.62 | 83.58 |
-| H2 consumato (MWh) | 138.62 | 83.58 |
-| Cicli equivalenti | 11.55 | 6.97 |
-| Efficienza round-trip | 42%* | 42%* |
+| Operazione | Condizione | Prezzo |
+|------------|------------|--------|
+| Import | Sempre disponibile | 469-549 EUR/MWh (ARERA) |
+| Export | Surplus disponibile | PUN variabile (10-870) |
 
-*Efficienza round-trip = eta_ely × eta_fc = 0.7 × 0.6 = 42%
-
-**Osservazione:** Il sistema H2 viene utilizzato attivamente ma con efficienza limitata (42%). Conviene usarlo per:
-- Spostare energia da ore di surplus a ore di deficit
-- Evitare curtailment delle rinnovabili
-- Ridurre import nelle ore di picco (tariffa F1)
-
-### 6.4 Analisi delle fonti di approvvigionamento
-
-#### Scenario 16 MW (cf=0.45)
-| Fonte | Energia (MWh) | % del carico |
-|-------|---------------|--------------|
-| PV | 5,434.80 | 14.3% |
-| Wind | 6,411.43 | 16.8% |
-| Import rete | 37,624.10 | 98.7% |
-| DG | 81.87 | 0.2% |
-| FC (da H2) | 83.17 | 0.2% |
-| **Totale generazione** | 49,635.37 | 130.2%* |
-| Export | -11,157.17 | -29.3% |
-| Consumo ELY | -198.02 | -0.5% |
-| **Bilancio = Carico** | 38,120.63 | 100.0% |
-
-*Il totale supera il 100% perche parte dell'energia viene esportata e parte usata per produrre H2.
+**Arbitraggio import/export:**
+- Sempre possibile perche il bilancio IN=OUT e rispettato
+- Conveniente quando PUN > costo import
+- Il sistema puo comprare E vendere contemporaneamente
 
 ---
 
-## 7. Confronto economico: quale opzione conviene?
+## 8. Decisioni ora per ora
 
-### 7.1 Riepilogo costi per MWh servito
+### 8.1 File generato
 
-| Scenario | Costo netto (EUR) | Costo per MWh (EUR/MWh) | Ranking |
-|----------|-------------------|-------------------------|---------|
-| 16 MW, cf=0.45 | 12,660,104 | 332.11 | 1 (migliore) |
-| 16 MW, cf=0.60 | 12,663,717 | 332.21 | 2 |
-| 20 MW, cf=0.45 | 17,527,353 | 367.85 | 3 |
-| 20 MW, cf=0.60 | 17,533,477 | 367.98 | 4 (peggiore) |
+Il file `outputs/DECISIONI_ORA_PER_ORA.csv` contiene per ogni ora:
 
-### 7.2 Raccomandazioni operative
+| Colonna | Descrizione |
+|---------|-------------|
+| datetime | Data e ora |
+| load_MW | Carico da soddisfare |
+| pv_MW, wind_MW | Produzione rinnovabili |
+| import_price, export_price | Prezzi correnti |
+| cf045_import_MW | Potenza importata (cf=0.45) |
+| cf045_export_MW | Potenza esportata (cf=0.45) |
+| cf045_DG_MW | Potenza DG (cf=0.45) |
+| cf045_ELY_MW | Potenza elettrolizzatore (cf=0.45) |
+| cf045_FC_MW | Potenza fuel cell (cf=0.45) |
+| cf045_H2_SOC_MWh | Stato storage H2 (cf=0.45) |
+| cf060_* | Stessi campi per cf=0.60 |
 
-#### Sul dimensionamento del carico:
-- **CONSIGLIATO**: Mantenere il carico piu basso possibile (16 MW vs 20 MW)
-- Risparmio: ~36 EUR/MWh (-10%)
-- Il sistema e piu efficiente con carichi minori perche le rinnovabili coprono una quota maggiore
+### 8.2 Come leggere le decisioni
 
-#### Sul generatore diesel (DG):
-- **SCONSIGLIATO** come fonte principale: costa 750-1000 EUR/MWh vs 515 EUR/MWh della rete
-- **CONSIGLIATO** solo come backup di emergenza quando:
-  - Import rete al massimo (20 MW)
-  - Storage H2 vuoto
-  - Carico critico da soddisfare
-- Con cf=0.60, il DG non e MAI conveniente rispetto alla rete
+Per ogni ora, controlla i valori:
 
-#### Sul sistema a idrogeno:
-- **UTILE** per energy shifting (spostare energia nel tempo)
-- **LIMITATO** dall'efficienza round-trip del 42%
-- **CONSIGLIATO** per evitare curtailment e ridurre import in ore di punta
+```
+SE import_MW > 0    -> Compra dalla rete
+SE export_MW > 0    -> Vendi alla rete
+SE DG_MW > 0        -> Accendi il diesel (solo cf=0.45, PUN alto)
+SE ELY_MW > 0       -> Carica storage H2 (surplus RES)
+SE FC_MW > 0        -> Scarica storage H2 (deficit)
+```
 
-#### Sull'export di energia:
-- **CONVENIENTE** quando PUN > costo medio di import (~515 EUR/MWh)
-- Genera ricavi significativi (5.9-6.5 M EUR nel periodo analizzato)
-- Riduce il costo netto del 25-34%
+### 8.3 Esempi pratici
 
-### 7.3 Scenario ottimale
+**Ora tipica - deficit (ora 15):**
+```
+Load: 18.21 MW, PV: 0.42 MW, Wind: 0 MW
+Decisione: IMPORT 17.79 MW
+```
 
-**Il miglior scenario e: Carico 16 MW con cf=0.45 EUR/kWh**
+**Ora con surplus RES (ora 34):**
+```
+Load: 9.29 MW, PV: 1.04 MW, Wind: 9.53 MW
+RES totale: 10.57 MW > Load
+Decisione: ELY 1.28 MW (carica H2)
+```
 
-Motivi:
-- Costo per MWh piu basso (332 EUR/MWh)
-- Maggiore copertura da rinnovabili (31%)
-- Maggiore export (ricavi piu alti)
-- DG usato minimamente (82 MWh su 6528 ore)
+**Ora con arbitraggio DG (ora 5694, cf=0.45):**
+```
+PUN: 769.12 EUR/MWh (molto alto!)
+Import: 20 MW, DG: 5 MW, Export: 14.46 MW
+Profitto: vendita a PUN alto usando DG
+```
 
 ---
 
-## 8. Conclusioni finali
+## 9. Conclusioni e raccomandazioni
 
-### 8.1 Sintesi dei risultati
+### 9.1 Sintesi risultati
 
-1. **Il DG e quasi sempre anti-economico**: anche con cf=0.45, costa il 46% in piu della rete. Con cf=0.60, non viene mai usato.
+1. **Il DG non conviene quasi mai**
+   - Con cf=0.45: usato solo 39 ore su 6528 (0.6%) per arbitraggio
+   - Con cf=0.60: MAI usato
+   - Impatto sul costo totale: < 0.5%
 
-2. **Le rinnovabili sono fondamentali**: PV+Wind coprono ~31% del fabbisogno a 16 MW, riducendo significativamente i costi.
+2. **L'arbitraggio e la chiave**
+   - Import + Export contemporanei sono ottimali
+   - Il DG si usa solo quando PUN > 750 EUR/MWh
+   - Il bilancio IN = OUT e sempre rispettato
 
-3. **L'export e una fonte di ricavo importante**: copre il 25-34% dei costi lordi di import.
+3. **Lo storage H2 ha uso limitato**
+   - Efficienza round-trip 42% (perdite elevate)
+   - Utile solo per energy shifting, non per arbitraggio
 
-4. **Lo storage H2 ha efficienza limitata** (42%) ma e utile per l'energy shifting.
+4. **La rete e la fonte principale**
+   - Import copre ~97% del fabbisogno
+   - Export genera ~25% di ricavo sui costi
 
-5. **Il costo del carburante DG ha impatto minimo** sul costo totale perche il DG viene usato raramente.
+### 9.2 Raccomandazioni operative
 
-### 8.2 Limiti dello studio
+| Componente | Raccomandazione |
+|------------|-----------------|
+| **DG** | Usare SOLO se PUN > 750 EUR/MWh (raro) |
+| **ELY** | Attivare quando surplus RES e SOC < 100% |
+| **FC** | Attivare quando deficit e import al max |
+| **Import** | Fonte principale, sempre conveniente |
+| **Export** | Vendere tutto il surplus possibile |
 
-- Il profilo di carico copre solo 6528 ore (non l'intero anno)
-- Non sono inclusi costi di avviamento/spegnimento dei generatori
-- Non sono inclusi costi di manutenzione e ammortamento
-- Le previsioni sono considerate perfette (nessun errore di forecast)
+### 9.3 Differenza tra scenari
 
-### 8.3 Sviluppi futuri consigliati
-
-1. Estendere l'analisi a 8760 ore (anno completo)
-2. Includere costi di startup/shutdown per DG, ELY, FC
-3. Aggiungere degradazione dello storage H2
-4. Testare scenari con prezzi carburante intermedi (0.50, 0.55 EUR/kWh)
-5. Includere incertezza nelle previsioni (stochastic MPC)
+La differenza tra cf=0.45 e cf=0.60 e **minima** (+0.03% costo):
+- Il parametro cf ha impatto solo quando si usa il DG
+- Con cf=0.60 il DG non si usa mai
+- Il sistema compensa con piu import dalla rete
 
 ---
 
-## 9. Appendice: Dettagli tecnici
+## 10. Appendice tecnica
 
-### 9.1 Tariffe F1, F2, F3 (ARERA)
-
-- **F1 (Punta)**: Lunedi-Venerdi 08:00-19:00 (escluse festivita)
-- **F2 (Intermedia)**: Lunedi-Venerdi 07-08 e 19-23; Sabato 07-23
-- **F3 (Fuori punta)**: Notti 23-07, Domeniche, Festivita italiane
-
-Festivita italiane considerate: Capodanno, Epifania, Pasquetta, 25 Aprile, 1 Maggio, 2 Giugno, Ferragosto, Ognissanti, Immacolata, Natale, Santo Stefano.
-
-### 9.2 Formule del modello MPC
-
-**Bilancio energetico:**
-```
-P_pv + P_wind + P_import + P_dg + P_fc = P_load + P_ely + P_export + P_curtail
-```
-
-**Dinamica storage H2:**
-```
-SoC(t+1) = SoC(t) + dt * (eta_ely * P_ely - P_fc / eta_fc)
-```
-
-**Funzione obiettivo:**
-```
-min: sum( c_import * P_import - p_export * P_export + (c_fuel/eta_dg) * P_dg + penalty * P_curtail )
-```
-
-### 9.3 File di output generati
+### 10.1 File di output
 
 | File | Descrizione |
 |------|-------------|
-| `outputs/mpc_receding_load16_cf045.csv` | Schedule orario MPC - 16MW, cf=0.45 |
-| `outputs/mpc_receding_load16_cf060.csv` | Schedule orario MPC - 16MW, cf=0.60 |
-| `outputs/mpc_receding_load20_cf045.csv` | Schedule orario MPC - 20MW, cf=0.45 |
-| `outputs/mpc_receding_load20_cf060.csv` | Schedule orario MPC - 20MW, cf=0.60 |
-| `outputs/report_load16_cf045.csv` | Metriche aggregate - 16MW, cf=0.45 |
-| `outputs/report_load16_cf060.csv` | Metriche aggregate - 16MW, cf=0.60 |
-| `outputs/report_load20_cf045.csv` | Metriche aggregate - 20MW, cf=0.45 |
-| `outputs/report_load20_cf060.csv` | Metriche aggregate - 20MW, cf=0.60 |
-| `outputs/plots/*.png` | Grafici time-series |
+| `outputs/mpc_receding_cf045.csv` | Schedule MPC completo (cf=0.45) |
+| `outputs/mpc_receding_cf060.csv` | Schedule MPC completo (cf=0.60) |
+| `outputs/DECISIONI_ORA_PER_ORA.csv` | Confronto decisioni ora per ora |
+| `outputs/report_cf045.csv` | Metriche aggregate |
+| `outputs/report_cf060.csv` | Metriche aggregate |
+| `outputs/plots/*.png` | Grafici risultati |
 
-### 9.4 Come riprodurre i risultati
+### 10.2 Come riprodurre i risultati
 
 ```bash
 # Installare dipendenze
 pip install -r requirements.txt
 
-# Eseguire simulazioni (tutti i 4 scenari)
-python src/run_mpc_full.py --horizon 24 --start 0 --out outputs/mpc_receding.csv
+# Eseguire MPC (genera schedule per entrambi gli scenari)
+python src/run_mpc_full.py --horizon 24 --fuel-values 0.45,0.60
 
-# Generare report per uno scenario specifico
-python src/report.py --schedule outputs/mpc_receding_load16_cf045.csv \
-                     --out outputs/report_load16_cf045.csv \
-                     --load-nom 16 --fuel-cost 0.45 --plots
+# Generare report
+python src/report.py --schedule outputs/mpc_receding_cf045.csv --out outputs/report_cf045.csv --fuel-cost 0.45 --plots
+python src/report.py --schedule outputs/mpc_receding_cf060.csv --out outputs/report_cf060.csv --fuel-cost 0.60
+
+# Generare grafici dettagliati
+python src/plot_results.py --hours 168 --start 0
+```
+
+### 10.3 Formule del modello
+
+**Bilancio energetico:**
+```
+P_pv + P_wind + P_import + P_dg + P_fc = P_load + P_ely + P_export + P_curt
+```
+
+**Dinamica storage H2:**
+```
+SOC(t+1) = SOC(t) + dt * (eta_ely * P_ely - P_fc / eta_fc)
+```
+
+**Funzione obiettivo:**
+```
+min: sum( c_import * P_import - PUN * P_export + (c_fuel/eta_dg) * P_dg + lambda * P_curt )
+```
+
+**Vincoli on/off (MILP):**
+```
+P_ely <= P_ely_nom * u_ely
+P_ely >= P_ely_min * u_ely
+(analogo per FC e DG)
 ```
 
 ---
 
-*Report generato il 2025-01-24*
+## 11. Come estendere il modello (guida per sviluppatori)
+
+### 11.1 Struttura del codice
+
+```
+src/
+├── model.py          <- MODELLO MPC (variabili, vincoli, obiettivo)
+├── run_mpc_full.py   <- LOOP MPC (rolling horizon)
+├── loader.py         <- Caricamento dati
+├── tariff.py         <- Tariffe ARERA
+├── report.py         <- Generazione report
+└── plot_results.py   <- Grafici
+
+configs/
+└── system.yaml       <- PARAMETRI (potenze, efficienze, prezzi)
+```
+
+### 11.2 Dove aggiungere una nuova VARIABILE DECISIONALE
+
+**File: `src/model.py`**
+
+**STEP 1 - Dichiarare la variabile (linea ~158-168):**
+```python
+# Esempio: aggiungere una batteria
+p_battery_ch = cp.Variable(horizon_h, nonneg=True)   # Carica batteria
+p_battery_dis = cp.Variable(horizon_h, nonneg=True)  # Scarica batteria
+u_battery = cp.Variable(horizon_h, boolean=True)     # On/off (opzionale)
+soc_battery = cp.Variable(horizon_h + 1)             # Stato di carica
+```
+
+**STEP 2 - Aggiungere i vincoli (linea ~172-194):**
+```python
+# Limiti potenza
+constraints += [p_battery_ch <= float(sys['battery_nom_mw'])]
+constraints += [p_battery_dis <= float(sys['battery_nom_mw'])]
+
+# Limiti SOC
+constraints += [soc_battery >= 0.0]
+constraints += [soc_battery <= float(sys['battery_capacity_mwh'])]
+
+# Condizione iniziale
+constraints += [soc_battery[0] == soc_battery_init]
+
+# Dinamica batteria
+constraints += [
+    soc_battery[1:] == soc_battery[:-1] + dt * (
+        eta_ch * p_battery_ch - p_battery_dis / eta_dis
+    )
+]
+
+# Mutua esclusione carica/scarica (opzionale)
+constraints += [p_battery_ch + p_battery_dis <= float(sys['battery_nom_mw']) * u_battery]
+```
+
+**STEP 3 - Aggiornare il bilancio energetico (linea ~186-189):**
+```python
+constraints += [
+    pv + wind + p_import + p_dg + p_fc + p_battery_dis  # <- AGGIUNTO
+    == load + p_ely + p_export + p_curt + p_battery_ch  # <- AGGIUNTO
+]
+```
+
+**STEP 4 - Aggiornare la funzione obiettivo (linea ~199-202):**
+```python
+# Se la batteria ha un costo di degradazione:
+cost += degradation_cost * cp.sum(p_battery_ch + p_battery_dis) * dt
+```
+
+**STEP 5 - Aggiungere al DataFrame di output (linea ~211-222):**
+```python
+schedule = pd.DataFrame({
+    # ... variabili esistenti ...
+    'p_battery_ch_mw': p_battery_ch.value,
+    'p_battery_dis_mw': p_battery_dis.value,
+    'soc_battery_mwh': soc_battery.value[1:],
+})
+```
+
+### 11.3 Dove aggiungere un nuovo PARAMETRO
+
+**File: `configs/system.yaml`**
+
+```yaml
+system:
+  # ... parametri esistenti ...
+
+  # Nuova batteria
+  battery_nom_mw: 10.0
+  battery_capacity_mwh: 40.0
+  eta_battery_ch: 0.95
+  eta_battery_dis: 0.95
+```
+
+**File: `src/model.py` - leggere il parametro:**
+```python
+battery_cap = float(sys['battery_capacity_mwh'])
+eta_ch = float(sys['eta_battery_ch'])
+eta_dis = float(sys['eta_battery_dis'])
+```
+
+### 11.4 Dove aggiungere un nuovo VINCOLO
+
+**File: `src/model.py` (linea ~172-194)**
+
+Esempi di vincoli comuni:
+
+```python
+# Vincolo rampa (variazione massima tra ore)
+constraints += [cp.abs(p_dg[1:] - p_dg[:-1]) <= ramp_rate_mw]
+
+# Vincolo mutua esclusione import/export
+constraints += [p_import * p_export == 0]  # Non lineare! Usare binarie:
+constraints += [p_import <= M * (1 - u_export)]
+constraints += [p_export <= M * u_export]
+
+# Vincolo minimo tempo accensione (DG acceso per almeno 3 ore)
+for t in range(horizon_h - 2):
+    constraints += [u_dg[t+1] + u_dg[t+2] >= 2 * (u_dg[t+1] - u_dg[t])]
+
+# Vincolo SOC finale = SOC iniziale (ciclo completo)
+constraints += [soc[-1] == soc[0]]
+```
+
+### 11.5 Dove modificare il LOOP MPC
+
+**File: `src/run_mpc_full.py` (linea ~19-48)**
+
+```python
+def run_receding(...):
+    results = []
+    soc = 0.0                    # <- Stato iniziale H2
+    soc_battery = 0.5            # <- Aggiungere stato iniziale batteria
+
+    for hour in tqdm(...):
+        res = solve_horizon(
+            df, cfg, hour, horizon,
+            soc,
+            soc_battery,         # <- Passare nuovo stato
+            fuel_eur_per_kwh=fuel_eur_per_kwh
+        )
+
+        first = res.schedule.iloc[0]
+        soc = float(first['soc_mwh'])
+        soc_battery = float(first['soc_battery_mwh'])  # <- Aggiornare
+
+        results.append({
+            # ... campi esistenti ...
+            'soc_battery_mwh': soc_battery,  # <- Aggiungere output
+        })
+```
+
+---
+
+## 12. Teoria MPC per l'esame
+
+### 12.1 Cos'e il Model Predictive Control?
+
+Il **MPC (Model Predictive Control)** e una strategia di controllo ottimo che:
+
+1. **Predice** il comportamento futuro del sistema su un orizzonte finito
+2. **Ottimizza** le azioni future minimizzando una funzione costo
+3. **Applica** solo la prima azione ottimale
+4. **Ripete** il processo ad ogni passo temporale
+
+### 12.2 Vantaggi del MPC
+
+| Vantaggio | Spiegazione |
+|-----------|-------------|
+| **Gestisce vincoli** | Limiti fisici (potenza max, SOC min/max) |
+| **Anticipa il futuro** | Usa previsioni per decisioni migliori |
+| **Adattivo** | Si aggiorna ad ogni passo con nuove informazioni |
+| **Multi-obiettivo** | Bilancia costi, emissioni, comfort |
+
+### 12.3 Svantaggi del MPC
+
+| Svantaggio | Spiegazione |
+|------------|-------------|
+| **Computazionalmente costoso** | Risolve ottimizzazione ad ogni passo |
+| **Dipende da previsioni** | Errori di forecast degradano le prestazioni |
+| **Tuning parametri** | Orizzonte, pesi obiettivo richiedono taratura |
+
+### 12.4 Differenza tra MPC e controllo classico
+
+| Aspetto | Controllo PID | MPC |
+|---------|---------------|-----|
+| Orizzonte | Istantaneo | Futuro (24h) |
+| Vincoli | Difficili da gestire | Nativamente supportati |
+| Modello | Non richiesto | Richiesto |
+| Ottimalita | Locale | Globale (sull'orizzonte) |
+
+### 12.5 Formulazione matematica
+
+**Problema di ottimizzazione ad ogni passo k:**
+
+```
+min    J = sum_{t=0}^{N-1} [ c_import(t)*P_import(t) - PUN(t)*P_export(t)
+ u(t)                        + c_fuel/eta_dg * P_dg(t) + lambda*P_curt(t) ]
+
+s.t.   P_pv(t) + P_wind(t) + P_import(t) + P_dg(t) + P_fc(t)
+       = P_load(t) + P_export(t) + P_ely(t) + P_curt(t)     [bilancio]
+
+       SOC(t+1) = SOC(t) + dt*(eta_ely*P_ely(t) - P_fc(t)/eta_fc)  [dinamica]
+
+       0 <= P_import(t) <= P_import_max                      [limiti]
+       0 <= P_export(t) <= P_export_max
+       P_ely_min * u_ely(t) <= P_ely(t) <= P_ely_max * u_ely(t)
+       ...
+
+       u_ely(t), u_fc(t), u_dg(t) in {0,1}                   [binarie]
+```
+
+Dove:
+- **N** = orizzonte di previsione (24 ore)
+- **u(t)** = variabili decisionali (P_import, P_export, P_ely, P_fc, P_dg)
+- **J** = funzione obiettivo (costo da minimizzare)
+
+---
+
+## 13. Domande frequenti per l'esame
+
+### 13.1 Domande sulla metodologia
+
+**D: Perche si applica solo la prima decisione?**
+> Perche le previsioni diventano meno accurate nel futuro. Applicando solo la prima decisione e ricalcolando, si usano sempre le previsioni piu aggiornate.
+
+**D: Cosa succede se le previsioni sono sbagliate?**
+> Il MPC e robusto agli errori grazie al feedback: ad ogni passo si ricalcola con i dati reali aggiornati. Errori grandi possono comunque degradare le prestazioni.
+
+**D: Perche l'orizzonte e 24 ore?**
+> Bilancia tra:
+> - Vedere abbastanza avanti per anticipare i picchi di prezzo/carico
+> - Non troppo avanti dove le previsioni sono inaffidabili
+> - Tempo di calcolo ragionevole
+
+**D: Perche MILP e non LP?**
+> I vincoli di potenza minima (P_ely >= 0.7 MW quando acceso) richiedono variabili binarie. Con LP puro, l'elettrolizzatore potrebbe funzionare a 0.1 MW, irrealistico.
+
+### 13.2 Domande sui risultati
+
+**D: Perche il DG non viene quasi mai usato?**
+> Perche il costo del DG (750-1000 EUR/MWh) e sempre maggiore dell'import dalla rete (~515 EUR/MWh). Conviene solo per arbitraggio quando PUN > 750.
+
+**D: Perche import e export possono essere contemporanei?**
+> Il sistema fa arbitraggio: compra a prezzo basso (ARERA) e vende a prezzo alto (PUN). Il bilancio energetico IN=OUT e sempre rispettato.
+
+**D: Perche lo storage H2 e poco usato?**
+> L'efficienza round-trip e solo 42% (= 0.7 * 0.6). Si perde il 58% dell'energia. Conviene solo per energy shifting, non per arbitraggio.
+
+**D: Qual e l'impatto del parametro cf?**
+> Con cf=0.45 il DG costa 750 EUR/MWh, usato 39 ore.
+> Con cf=0.60 il DG costa 1000 EUR/MWh, MAI usato.
+> La differenza sul costo totale e solo +0.03%.
+
+### 13.3 Domande sul codice
+
+**D: Come si aggiunge una nuova variabile?**
+> Vedi Sezione 11.2 - modificare `model.py` in 5 punti: dichiarazione, vincoli, bilancio, obiettivo, output.
+
+**D: Dove sono definiti i parametri?**
+> In `configs/system.yaml` - potenze nominali, efficienze, prezzi.
+
+**D: Come si cambia l'orizzonte MPC?**
+> Parametro `horizon_h` in `configs/system.yaml` oppure argomento `--horizon` da linea di comando.
+
+---
+
+## 14. Glossario dei termini
+
+| Termine | Significato |
+|---------|-------------|
+| **MPC** | Model Predictive Control - controllo predittivo basato su modello |
+| **MILP** | Mixed Integer Linear Programming - ottimizzazione con variabili intere e continue |
+| **LP** | Linear Programming - ottimizzazione lineare (solo variabili continue) |
+| **Rolling Horizon** | Orizzonte mobile - ripetere l'ottimizzazione ad ogni passo |
+| **SOC** | State of Charge - stato di carica dello storage (0-100%) |
+| **PUN** | Prezzo Unico Nazionale - prezzo energia all'ingrosso in Italia |
+| **ARERA** | Autorita di Regolazione per Energia Reti e Ambiente |
+| **F1/F2/F3** | Fasce orarie tariffarie italiane (punta/intermedia/fuori punta) |
+| **ELY** | Elettrolizzatore - produce H2 da elettricita |
+| **FC** | Fuel Cell - produce elettricita da H2 |
+| **DG** | Diesel Generator - generatore a combustibile fossile |
+| **RES** | Renewable Energy Sources - fonti rinnovabili (PV + Wind) |
+| **Curtailment** | Taglio della produzione rinnovabile (energia sprecata) |
+| **Arbitraggio** | Comprare a prezzo basso e vendere a prezzo alto |
+| **Round-trip efficiency** | Efficienza ciclo completo (carica + scarica) |
+| **Big-M** | Tecnica per linearizzare vincoli con variabili binarie |
+
+---
+
+## 15. Checklist per l'esame
+
+### 15.1 Concetti da sapere spiegare
+
+- [ ] Cos'e il MPC e come funziona (4 step)
+- [ ] Differenza tra MILP e LP
+- [ ] Perche servono variabili binarie
+- [ ] Come si scrive il bilancio energetico
+- [ ] Come funziona la dinamica dello storage
+- [ ] Cosa rappresenta la funzione obiettivo
+- [ ] Perche si usa rolling horizon
+- [ ] Come interpretare i risultati
+
+### 15.2 Formule da conoscere
+
+```
+Bilancio:   P_pv + P_wind + P_import + P_dg + P_fc = P_load + P_ely + P_export + P_curt
+
+Dinamica:   SOC(t+1) = SOC(t) + dt * (eta_ely * P_ely - P_fc / eta_fc)
+
+Obiettivo:  min sum( c_import*P_import - PUN*P_export + (c_fuel/eta_dg)*P_dg )
+
+Vincolo on/off:  P_min * u <= P <= P_max * u,  u in {0,1}
+```
+
+### 15.3 Numeri chiave del progetto
+
+| Parametro | Valore |
+|-----------|--------|
+| Potenza PV | 4 MW |
+| Potenza Wind | 11.34 MW |
+| Carico nominale | 20 MW |
+| Import max | 20 MW |
+| Export max | 16 MW |
+| Storage H2 | 12 MWh |
+| Efficienza ELY | 70% |
+| Efficienza FC | 60% |
+| Efficienza DG | 60% |
+| Orizzonte MPC | 24 ore |
+| Ore simulate | 6528 |
+| Costo netto | ~17.5 M EUR |
+
+---
+
+*Report generato il 2026-01-27*
 *Progetto: UCBM - Project 4 - Sistema Energetico con Idrogeno*
+*Metodologia: MPC Rolling Horizon con ottimizzazione MILP*

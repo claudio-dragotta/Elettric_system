@@ -1,2 +1,0 @@
-hours,energy_load_mwh,energy_pv_mwh,energy_wind_mwh,energy_import_mwh,energy_export_mwh,energy_dg_mwh,energy_ely_mwh,energy_fc_mwh,energy_curt_mwh,cost_import_eur,income_export_eur,cost_dg_eur,net_cost_eur
-6528,47650.78809528942,5434.804339454641,6411.4317583213515,21524.926299054427,12204.95055362085,26695.4349679,57.145600949999995,24.00115224,0.0,10973081.462814167,7127653.952962921,12012945.735555,15858373.245406248

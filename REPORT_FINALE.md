@@ -111,7 +111,27 @@ P_pv + P_wind + P_import + P_dg + P_fc = P_load + P_export + P_ely + P_curt
 
 - **PUN 2022**: Prezzo Unico Nazionale, varia ora per ora
 - Range: 10 - 870 EUR/MWh
-- Media annuale: ~324 EUR/MWh
+- Media annuale: ~304 EUR/MWh
+
+#### Analisi statistica del PUN 2022
+
+| Soglia | Ore | % del totale |
+|--------|-----|--------------|
+| PUN > 750 EUR/MWh | 47 ore | 0.54% |
+| PUN > 700 EUR/MWh | 90 ore | 1.03% |
+| PUN > 600 EUR/MWh | 315 ore | 3.60% |
+| PUN > 500 EUR/MWh | 816 ore | 9.32% |
+
+**Statistiche PUN 2022:**
+- Minimo: 10 EUR/MWh
+- Massimo: 870 EUR/MWh
+- Media: 304 EUR/MWh
+
+**Perche il DG e usato 39 ore e non 47?**
+
+Le 47 ore con PUN > 750 sono nel dataset completo (8760 ore), ma noi simuliamo solo **6528 ore** (limitate dal file buildings_load.mat). Inoltre, anche quando PUN > 750, il DG si usa solo se conviene nel contesto dell'ottimizzazione (bilancio energetico, stato storage H2, ecc.).
+
+Le ore con PUN alto sono concentrate ad **agosto 2022** (ore 5634-5800), periodo di crisi energetica in Europa.
 
 ### 4.3 Costo carburante DG (scenari testati)
 

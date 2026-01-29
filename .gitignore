@@ -4,3 +4,12 @@ data/Projects_extracted.txt
 .claude
 nul
 docs
+
+# Python cache
+__pycache__/
+*.pyc
+
+# IDE/editor
+.vscode/
+DISCORSO_PRESENTAZIONE.md
+Sistema-Energetico-Integrato-con-Idrogeno.pdf

@@ -1,0 +1,2 @@
+hours,energy_load_mwh,energy_pv_mwh,energy_wind_mwh,energy_import_mwh,energy_export_mwh,energy_dg_mwh,energy_ely_mwh,energy_fc_mwh,energy_curt_mwh,cost_import_eur,income_export_eur,cost_dg_eur,net_cost_eur,h2_equivalent_cycles,h2_roundtrip_efficiency
+6528,47741.580595344036,5427.5667412378825,6331.747591807447,36568.61407086273,518.7630241810912,0.0,116.49457326555611,48.927720771533444,0.0179318889150814,18525600.758234903,163700.36999381738,0.0,18361900.388241086,6.892595584878731,41.99999999999989

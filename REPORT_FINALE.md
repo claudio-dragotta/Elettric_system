@@ -92,8 +92,6 @@ P_fc
 Formula:
 ```
 P_pv + P_wind + P_import + P_dg + P_fc = P_load + P_export + P_ely + P_curt
-```
-
 ---
 
 ## 4. Prezzi e tariffe utilizzati
@@ -111,27 +109,26 @@ P_pv + P_wind + P_import + P_dg + P_fc = P_load + P_export + P_ely + P_curt
 
 - **PUN 2022**: Prezzo Unico Nazionale, varia ora per ora
 - Range: 10 - 870 EUR/MWh
-- Media annuale: ~304 EUR/MWh
+- Media annuale (dataset 6,528 ore): ~324.22 EUR/MWh
 
 #### Analisi statistica del PUN 2022
 
 | Soglia | Ore | % del totale |
 |--------|-----|--------------|
-| PUN > 750 EUR/MWh | 47 ore | 0.54% |
-| PUN > 700 EUR/MWh | 90 ore | 1.03% |
-| PUN > 600 EUR/MWh | 315 ore | 3.60% |
-| PUN > 500 EUR/MWh | 816 ore | 9.32% |
+| PUN > 750 EUR/MWh | 47 ore | 0.72% |
+| PUN > 700 EUR/MWh | 90 ore | 1.37% |
+| PUN > 600 EUR/MWh | 315 ore | 4.81% |
+| PUN > 500 EUR/MWh | 793 ore | 12.10% |
 
-**Statistiche PUN 2022:**
+**Statistiche PUN 2022 (dataset 6,528 ore):**
 - Minimo: 10 EUR/MWh
 - Massimo: 870 EUR/MWh
-- Media: 304 EUR/MWh
+- Media: 324.22 EUR/MWh
+- Mediana: 275.14 EUR/MWh
+- Deviazione standard: 136.65 EUR/MWh
 
-**Perche il DG e usato 39 ore e non 47?**
-
-Le 47 ore con PUN > 750 sono nel dataset completo (8760 ore), ma noi simuliamo solo **6528 ore** (limitate dal file buildings_load.mat). Inoltre, anche quando PUN > 750, il DG si usa solo se conviene nel contesto dell'ottimizzazione (bilancio energetico, stato storage H2, ecc.).
-
-Le ore con PUN alto sono concentrate ad **agosto 2022** (ore 5634-5800), periodo di crisi energetica in Europa.
+**Nota operativa (modello aggiornato):**
+Con il vincolo di mutua esclusione import/export, l'export avviene solo da surplus RES e il DG non viene attivato (0 ore) negli scenari 2022, anche nelle ore con PUN alto.
 
 ### 4.3 Costo carburante DG (scenari testati)
 
@@ -164,65 +161,34 @@ Per ogni ora, il sistema decide la configurazione ottimale seguendo questa logic
     |                   |         |                   |
     v                   v         v                   v
 Export a PUN?     Carica H2?   Scarica H2?      Import rete?
-(se PUN alto)     (se SOC<max) (se SOC>0)       (se <20MW)
+(solo surplus)    (se SOC<max) (se SOC>0)       (se <20MW)
     |                   |         |                   |
     +-------------------+         +-------------------+
               |                             |
               v                             v
     Se ancora surplus:              Se ancora deficit:
-    -> CURTAILMENT                  -> USA DG (se PUN>750)
+    -> CURTAILMENT                  -> USA DG (solo se necessario)
 ```
 
-### 5.2 Arbitraggio sui prezzi
+### 5.2 Arbitraggio sui prezzi (modello aggiornato)
 
-Il sistema puo fare **arbitraggio** quando i prezzi lo permettono:
+Nel modello attuale import ed export sono **mutuamente esclusivi**: non si compra e non si vende nella stessa ora.
+L'export avviene solo in presenza di **surplus rinnovabile**, quindi non c'e' arbitraggio puro di rete.
+Nei risultati 2022 il DG non viene mai attivato.
 
-**Esempio ora 5694 (cf=0.45):**
-```
-Prezzi:
-  - Import ARERA: 468.68 EUR/MWh
-  - Export PUN:   769.12 EUR/MWh  (molto alto!)
-  - Costo DG:     750.00 EUR/MWh
+### 5.3 Statistiche operative (6528 ore)
 
-Decisione ottimale:
-  - Import:  20.00 MW (massimo)
-  - DG:       5.00 MW (massimo)
-  - Export:  14.46 MW
-  - Load:    10.87 MW
+| Indicatore | cf=0.45 | cf=0.60 |
+|-----------|--------:|--------:|
+| Ore totali | 6528 | 6528 |
+| Ore con Import | 6186 | 6186 |
+| Ore con Export | 284 | 284 |
+| Ore con ELY | 61 | 61 |
+| Ore con FC | 28 | 28 |
+| Ore con DG | 0 | 0 |
+| Ore Import+Export | 0 | 0 |
 
-Bilancio: 20 + 5 + 0.33(RES) = 10.87 + 14.46 = 25.33 MW  [OK]
-
-Profitto arbitraggio:
-  - Compro 20 MW a 468.68 = 9,374 EUR (costo)
-  - Vendo 14.46 MW a 769.12 = 11,122 EUR (ricavo)
-  - DG 5 MW a 750 = 3,750 EUR (costo)
-  - Netto: 11,122 - 9,374 - 3,750 = -2,002 EUR
-
-Ma il sistema copre anche il carico di 10.87 MW!
-```
-
-**Quando conviene usare il DG per arbitraggio:**
-```
-PUN > Costo_DG  =>  PUN > 750 EUR/MWh (cf=0.45)
-                    PUN > 1000 EUR/MWh (cf=0.60, mai raggiunto)
-```
-
-### 5.3 Strategie identificate
-
-Analisi delle 6528 ore simulate:
-
-| Strategia | cf=0.45 | cf=0.60 | Descrizione |
-|-----------|--------:|--------:|-------------|
-| IMPORT | 5438 | 5439 | Solo import dalla rete |
-| IMPORT+EXPORT | 680 | 719 | Import + export (arbitraggio base) |
-| EXPORT | 236 | 239 | Solo export (surplus RES) |
-| ELY | 56 | 52 | Carica storage H2 |
-| **IMPORT+EXPORT+DG** | **39** | **0** | Arbitraggio con DG |
-| RES | 35 | 35 | Solo rinnovabili |
-| IMPORT+FC | 34 | 33 | Scarica storage H2 |
-| Altre | 10 | 11 | Combinazioni varie |
-
-**Osservazione chiave:** Con cf=0.60 il DG non viene MAI usato (costo troppo alto).
+**Osservazione chiave:** i due scenari risultano identici perche' il DG non viene mai usato.
 
 ---
 
@@ -235,44 +201,42 @@ Periodo simulato: **6528 ore** con MPC rolling horizon (orizzonte 24h)
 | Voce | cf=0.45 | cf=0.60 | Differenza |
 |------|--------:|--------:|------------|
 | **ENERGIA** ||||
-| Energia carico (MWh) | 47,650.79 | 47,650.79 | 0 |
-| Energia PV (MWh) | 5,434.80 | 5,434.80 | 0 |
-| Energia Wind (MWh) | 6,411.43 | 6,411.43 | 0 |
-| Energia Import (MWh) | 46,050.71 | 46,052.37 | +0.004% |
-| Energia Export (MWh) | 10,127.95 | 10,003.06 | -1.2% |
-| **Energia DG (MWh)** | **128.76** | **0.00** | **-100%** |
+| Energia carico (MWh) | 47,741.58 | 47,741.58 | 0 |
+| Energia PV (MWh) | 5,427.57 | 5,427.57 | 0 |
+| Energia Wind (MWh) | 6,331.75 | 6,331.75 | 0 |
+| Energia Import (MWh) | 36,568.61 | 36,568.61 | 0 |
+| Energia Export (MWh) | 518.76 | 518.76 | 0 |
+| **Energia DG (MWh)** | **0.00** | **0.00** | **0** |
 | **SISTEMA H2** ||||
-| Energia ELY (MWh) | 119.40 | 115.58 | -3.2% |
-| Energia FC (MWh) | 50.15 | 48.54 | -3.2% |
-| H2 prodotto (MWh) | 83.58 | 80.91 | -3.2% |
+| Energia ELY (MWh) | 116.49 | 116.49 | 0 |
+| Energia FC (MWh) | 48.93 | 48.93 | 0 |
+| H2 prodotto (MWh) | 81.55 | 81.55 | 0 |
 | **COSTI** ||||
-| Costo Import (EUR) | 23,417,554 | 23,418,483 | +0.004% |
-| Ricavo Export (EUR) | 5,986,768 | 5,885,006 | -1.7% |
-| Costo DG (EUR) | 96,566 | 0 | -100% |
-| **COSTO NETTO (EUR)** | **17,527,353** | **17,533,477** | **+0.03%** |
+| Costo Import (EUR) | 18,525,601 | 18,525,601 | 0 |
+| Ricavo Export (EUR) | 163,700 | 163,700 | 0 |
+| Costo DG (EUR) | 0 | 0 | 0 |
+| **COSTO NETTO (EUR)** | **18,361,900** | **18,361,900** | **0** |
 
 ### 6.2 Breakdown costi
 
 **cf=0.45:**
 ```
-Costo Import:      +23,417,554 EUR  (99.6%)
-Costo DG:              +96,566 EUR   (0.4%)
-Ricavo Export:      -5,986,768 EUR (-25.5%)
+Costo Import:      +18,525,601 EUR  (100.0%)
+Costo DG:                    0 EUR   (0.0%)
+Ricavo Export:        -163,700 EUR  (-0.9%)
 ---------------------------------------------
-COSTO NETTO:       17,527,353 EUR
-Costo per MWh:     367.83 EUR/MWh
+COSTO NETTO:       18,361,900 EUR
+Costo per MWh:     384.61 EUR/MWh
 ```
 
 **cf=0.60:**
 ```
-Costo Import:      +23,418,483 EUR (100.0%)
+Costo Import:      +18,525,601 EUR (100.0%)
 Costo DG:                    0 EUR   (0.0%)
-Ricavo Export:      -5,885,006 EUR (-25.1%)
+Ricavo Export:        -163,700 EUR  (-0.9%)
 ---------------------------------------------
-COSTO NETTO:       17,533,477 EUR
-Costo per MWh:     367.96 EUR/MWh
-```
-
+COSTO NETTO:       18,361,900 EUR
+Costo per MWh:     384.61 EUR/MWh
 ---
 
 ## 7. Analisi economica: quando conviene ogni componente
@@ -283,13 +247,13 @@ Costo per MWh:     367.96 EUR/MWh
 |------------|---------|---------|
 | Costo DG | 750 EUR/MWh | 1000 EUR/MWh |
 | PUN max 2022 | 870 EUR/MWh | 870 EUR/MWh |
-| **Conviene arbitraggio?** | **Si, se PUN > 750** | **No, mai** |
-| Ore con DG attivo | 39 | 0 |
+| **Conviene arbitraggio?** | **No (modello senza arbitraggio)** | **No (modello senza arbitraggio)** |
+| Ore con DG attivo | 0 | 0 |
 
 **Conclusione DG:**
-- Con cf=0.45: usato SOLO per arbitraggio quando PUN e molto alto (>750)
-- Con cf=0.60: MAI conveniente (costo 1000 > PUN max 870)
-- Il DG e marginale nel mix energetico (<0.3% dell'energia)
+- Il DG non viene mai attivato negli scenari 2022 (0 ore)
+- Il vincolo di mutua esclusione import/export elimina l'arbitraggio di rete
+- Il DG resta disponibile come backup, ma non risulta conveniente nei dati 2022
 
 ### 7.2 Sistema Idrogeno (ELY + FC)
 
@@ -319,31 +283,28 @@ L'efficienza del 42% lo rende utile solo per:
 | Export | Surplus disponibile | PUN variabile (10-870) |
 
 **Arbitraggio import/export:**
-- Sempre possibile perche il bilancio IN=OUT e rispettato
-- Conveniente quando PUN > costo import
-- Il sistema puo comprare E vendere contemporaneamente
+- Non consentito: import ed export sono mutuamente esclusivi
+- Export solo in presenza di surplus RES
 
 ---
 
 ## 8. Decisioni ora per ora
 
-### 8.1 File generato
+### 8.1 File generati
 
-Il file `outputs/DECISIONI_ORA_PER_ORA.csv` contiene per ogni ora:
+I file `outputs/mpc_2022_cf045.csv` e `outputs/mpc_2022_cf060.csv` contengono per ogni ora:
 
 | Colonna | Descrizione |
 |---------|-------------|
-| datetime | Data e ora |
-| load_MW | Carico da soddisfare |
-| pv_MW, wind_MW | Produzione rinnovabili |
-| import_price, export_price | Prezzi correnti |
-| cf045_import_MW | Potenza importata (cf=0.45) |
-| cf045_export_MW | Potenza esportata (cf=0.45) |
-| cf045_DG_MW | Potenza DG (cf=0.45) |
-| cf045_ELY_MW | Potenza elettrolizzatore (cf=0.45) |
-| cf045_FC_MW | Potenza fuel cell (cf=0.45) |
-| cf045_H2_SOC_MWh | Stato storage H2 (cf=0.45) |
-| cf060_* | Stessi campi per cf=0.60 |
+| hour | Indice ora |
+| p_import_mw | Potenza importata [MW] |
+| p_export_mw | Potenza esportata [MW] |
+| p_ely_mw | Potenza elettrolizzatore [MW] |
+| p_fc_mw | Potenza fuel cell [MW] |
+| p_dg_mw | Potenza diesel [MW] |
+| p_curt_mw | Curtailment [MW] |
+| soc_mwh | Stato di carica H2 [MWh] |
+| objective_eur | Costo totale dell'orizzonte [EUR] |
 
 ### 8.2 Come leggere le decisioni
 
@@ -352,7 +313,7 @@ Per ogni ora, controlla i valori:
 ```
 SE import_MW > 0    -> Compra dalla rete
 SE export_MW > 0    -> Vendi alla rete
-SE DG_MW > 0        -> Accendi il diesel (solo cf=0.45, PUN alto)
+SE DG_MW > 0        -> Accendi il diesel (backup)
 SE ELY_MW > 0       -> Carica storage H2 (surplus RES)
 SE FC_MW > 0        -> Scarica storage H2 (deficit)
 ```
@@ -372,11 +333,6 @@ RES totale: 10.57 MW > Load
 Decisione: ELY 1.28 MW (carica H2)
 ```
 
-**Ora con arbitraggio DG (ora 5694, cf=0.45):**
-```
-PUN: 769.12 EUR/MWh (molto alto!)
-Import: 20 MW, DG: 5 MW, Export: 14.46 MW
-Profitto: vendita a PUN alto usando DG
 ```
 
 ---
@@ -385,40 +341,37 @@ Profitto: vendita a PUN alto usando DG
 
 ### 9.1 Sintesi risultati
 
-1. **Il DG non conviene quasi mai**
-   - Con cf=0.45: usato solo 39 ore su 6528 (0.6%) per arbitraggio
-   - Con cf=0.60: MAI usato
-   - Impatto sul costo totale: < 0.5%
+1. **DG non utilizzato**
+   - 0 ore in entrambi gli scenari
+   - Rimane come backup, ma non risulta conveniente nei dati 2022
 
-2. **L'arbitraggio e la chiave**
-   - Import + Export contemporanei sono ottimali
-   - Il DG si usa solo quando PUN > 750 EUR/MWh
-   - Il bilancio IN = OUT e sempre rispettato
+2. **Nessun arbitraggio di rete**
+   - Import ed export sono mutuamente esclusivi
+   - Export solo da surplus RES (284 ore)
 
 3. **Lo storage H2 ha uso limitato**
    - Efficienza round-trip 42% (perdite elevate)
-   - Utile solo per energy shifting, non per arbitraggio
+   - ~6.9 cicli equivalenti/anno (ELY 61 ore, FC 28 ore)
 
 4. **La rete e la fonte principale**
-   - Import copre ~97% del fabbisogno
-   - Export genera ~25% di ricavo sui costi
+   - Import copre la maggior parte del fabbisogno
+   - Export genera ricavi marginali (~0.164 M EUR)
 
 ### 9.2 Raccomandazioni operative
 
 | Componente | Raccomandazione |
 |------------|-----------------|
-| **DG** | Usare SOLO se PUN > 750 EUR/MWh (raro) |
+| **DG** | Backup solo se necessario (nei dati 2022 non usato) |
 | **ELY** | Attivare quando surplus RES e SOC < 100% |
 | **FC** | Attivare quando deficit e import al max |
 | **Import** | Fonte principale, sempre conveniente |
-| **Export** | Vendere tutto il surplus possibile |
+| **Export** | Vendere il surplus RES (senza import contemporaneo) |
 
 ### 9.3 Differenza tra scenari
 
-La differenza tra cf=0.45 e cf=0.60 e **minima** (+0.03% costo):
-- Il parametro cf ha impatto solo quando si usa il DG
-- Con cf=0.60 il DG non si usa mai
-- Il sistema compensa con piu import dalla rete
+La differenza tra cf=0.45 e cf=0.60 e **nulla** nei risultati 2022:
+- Il DG non viene mai attivato in entrambi gli scenari
+- Import, export e costi risultano identici
 
 ---
 
@@ -428,12 +381,13 @@ La differenza tra cf=0.45 e cf=0.60 e **minima** (+0.03% costo):
 
 | File | Descrizione |
 |------|-------------|
-| `outputs/mpc_receding_cf045.csv` | Schedule MPC completo (cf=0.45) |
-| `outputs/mpc_receding_cf060.csv` | Schedule MPC completo (cf=0.60) |
-| `outputs/DECISIONI_ORA_PER_ORA.csv` | Confronto decisioni ora per ora |
-| `outputs/report_cf045.csv` | Metriche aggregate |
-| `outputs/report_cf060.csv` | Metriche aggregate |
+| `outputs/mpc_2022_cf045.csv` | Schedule MPC completo (cf=0.45) |
+| `outputs/mpc_2022_cf060.csv` | Schedule MPC completo (cf=0.60) |
+| `outputs/tabella_comparativa_2022_2025.txt` | Confronto 2022 vs 2025 |
+| `outputs/report_2022_cf045.csv` | Metriche aggregate (cf=0.45) |
+| `outputs/report_2022_cf060.csv` | Metriche aggregate (cf=0.60) |
 | `outputs/plots/*.png` | Grafici risultati |
+| `outputs/vecchi/*` | Output legacy (decisioni ora per ora, report storici) |
 
 ### 10.2 Come riprodurre i risultati
 
@@ -442,11 +396,11 @@ La differenza tra cf=0.45 e cf=0.60 e **minima** (+0.03% costo):
 pip install -r requirements.txt
 
 # Eseguire MPC (genera schedule per entrambi gli scenari)
-python src/run_mpc_full.py --horizon 24 --fuel-values 0.45,0.60
+python src/run_mpc_full.py --horizon 24 --fuel-values 0.45,0.60 --out outputs/mpc_2022.csv
 
 # Generare report
-python src/report.py --schedule outputs/mpc_receding_cf045.csv --out outputs/report_cf045.csv --fuel-cost 0.45 --plots
-python src/report.py --schedule outputs/mpc_receding_cf060.csv --out outputs/report_cf060.csv --fuel-cost 0.60
+python src/report.py --schedule outputs/mpc_2022_cf045.csv --out outputs/report_2022_cf045.csv --fuel-cost 0.45 --plots
+python src/report.py --schedule outputs/mpc_2022_cf060.csv --out outputs/report_2022_cf060.csv --fuel-cost 0.60
 
 # Generare grafici dettagliati
 python src/plot_results.py --hours 168 --start 0
@@ -718,18 +672,17 @@ Dove:
 ### 13.2 Domande sui risultati
 
 **D: Perche il DG non viene quasi mai usato?**
-> Perche il costo del DG (750-1000 EUR/MWh) e sempre maggiore dell'import dalla rete (~515 EUR/MWh). Conviene solo per arbitraggio quando PUN > 750.
+> Nel modello aggiornato il DG non viene mai usato: l'import resta piu conveniente e l'arbitraggio di rete e' impedito dalla mutua esclusione import/export.
 
 **D: Perche import e export possono essere contemporanei?**
-> Il sistema fa arbitraggio: compra a prezzo basso (ARERA) e vende a prezzo alto (PUN). Il bilancio energetico IN=OUT e sempre rispettato.
+> Non possono: il modello impone mutua esclusione. L'export avviene solo in presenza di surplus RES.
 
 **D: Perche lo storage H2 e poco usato?**
 > L'efficienza round-trip e solo 42% (= 0.7 * 0.6). Si perde il 58% dell'energia. Conviene solo per energy shifting, non per arbitraggio.
 
 **D: Qual e l'impatto del parametro cf?**
-> Con cf=0.45 il DG costa 750 EUR/MWh, usato 39 ore.
-> Con cf=0.60 il DG costa 1000 EUR/MWh, MAI usato.
-> La differenza sul costo totale e solo +0.03%.
+> Nei risultati 2022 e' nullo: il DG non viene mai attivato in entrambi gli scenari.
+> Di conseguenza costi e flussi risultano identici.
 
 ### 13.3 Domande sul codice
 
@@ -807,10 +760,10 @@ Vincolo on/off:  P_min * u <= P <= P_max * u,  u in {0,1}
 | Efficienza DG | 60% |
 | Orizzonte MPC | 24 ore |
 | Ore simulate | 6528 |
-| Costo netto | ~17.5 M EUR |
+| Costo netto | ~18.36 M EUR |
 
 ---
 
-*Report generato il 2026-01-27*
+*Report generato il 2026-01-30*
 *Progetto: UCBM - Project 4 - Sistema Energetico con Idrogeno*
 *Metodologia: MPC Rolling Horizon con ottimizzazione MILP*

@@ -1,0 +1,194 @@
+================================================================================
+                    INFORMAZIONI TEST MPC 2025
+================================================================================
+
+Data creazione: Gennaio 2026
+Fonte dati PUN: GME (Gestore Mercati Energetici)
+Fonte tariffe: ARERA - Servizio Tutele Graduali
+
+================================================================================
+                    TARIFFE ARERA 2025 (Dicembre 2025)
+================================================================================
+
+PREZZI PER FASCIA ORARIA (EUR/kWh):
+
+    F1 (Ore di punta):        0.164138 EUR/kWh  =  164.14 EUR/MWh
+    F2 (Ore intermedie):      0.153016 EUR/kWh  =  153.02 EUR/MWh
+    F3 (Ore fuori punta):     0.136011 EUR/kWh  =  136.01 EUR/MWh
+
+    Monoraria (media):        0.148077 EUR/kWh  =  148.08 EUR/MWh
+
+================================================================================
+                    DEFINIZIONE FASCE ORARIE
+================================================================================
+
+F1 - ORE DI PUNTA:
+    - Lunedi-Venerdi: 08:00 - 19:00
+    - Escluse festivita nazionali
+
+F2 - ORE INTERMEDIE:
+    - Lunedi-Venerdi: 07:00-08:00 e 19:00-23:00
+    - Sabato: 07:00-23:00
+    - Escluse festivita nazionali
+
+F3 - ORE FUORI PUNTA:
+    - Lunedi-Sabato: 00:00-07:00 e 23:00-24:00
+    - Domenica: tutto il giorno
+    - Festivita nazionali: tutto il giorno
+
+================================================================================
+                    COSTO COMBUSTIBILE 2025 (cf)
+================================================================================
+
+DATI:
+    Prezzo gasolio 2025: ~1.39 EUR/litro
+    Energia gasolio: ~10 kWh/litro
+    Conversione: 1.39 / 10 = 0.139 EUR/kWh
+
+SCENARI:
+
+    cf = 0.14 EUR/kWh (scenario base 2025)
+        -> Costo DG = 0.14 / 0.6 (eta_dg) = 0.233 EUR/kWh = 233 EUR/MWh
+
+    cf = 0.20 EUR/kWh (scenario alternativo)
+        -> Costo DG = 0.20 / 0.6 (eta_dg) = 0.333 EUR/kWh = 333 EUR/MWh
+
+================================================================================
+                    CONFRONTO 2022 vs 2025
+================================================================================
+
+PREZZI IMPORT (ARERA):
+                            2022 (Crisi)        2025 (Normale)      Variazione
+    ----------------------------------------------------------------------------
+    F1 (ore punta)          532.76 EUR/MWh      164.14 EUR/MWh        -69%
+    F2 (ore intermedie)     548.58 EUR/MWh      153.02 EUR/MWh        -72%
+    F3 (ore fuori punta)    468.68 EUR/MWh      136.01 EUR/MWh        -71%
+    ----------------------------------------------------------------------------
+
+PREZZI EXPORT (PUN - dati reali GME):
+                            2022 (Crisi)        2025 (Normale)      Variazione
+    ----------------------------------------------------------------------------
+    Minimo                   10.00 EUR/MWh        0.00 EUR/MWh           -
+    Massimo                 870.00 EUR/MWh      289.00 EUR/MWh        -67%
+    Media                   303.95 EUR/MWh      115.91 EUR/MWh        -62%
+    Mediana                 264.30 EUR/MWh      114.94 EUR/MWh        -57%
+    Deviazione Std          133.12 EUR/MWh       29.65 EUR/MWh        -78%
+    ----------------------------------------------------------------------------
+
+PERCENTILI PUN:
+                            2022 (Crisi)        2025 (Normale)
+    ----------------------------------------------------------------------------
+    P10                     174.59 EUR/MWh       88.41 EUR/MWh
+    P25                     210.80 EUR/MWh      102.35 EUR/MWh
+    P50 (mediana)           264.30 EUR/MWh      114.94 EUR/MWh
+    P75                     380.53 EUR/MWh      132.27 EUR/MWh
+    P90                     493.08 EUR/MWh      150.04 EUR/MWh
+    P95                     571.15 EUR/MWh      161.32 EUR/MWh
+    P99                     701.41 EUR/MWh      185.80 EUR/MWh
+    ----------------------------------------------------------------------------
+
+COSTI OPERATIVI:
+                            2022 (Crisi)        2025 (Normale)      Variazione
+    ----------------------------------------------------------------------------
+    cf (combustibile)       0.45 EUR/kWh        0.14 EUR/kWh          -69%
+    Costo DG                750 EUR/MWh         233 EUR/MWh           -69%
+    ----------------------------------------------------------------------------
+
+OSSERVAZIONI:
+    - PUN 2025 molto piu' stabile (Std Dev 30 vs 133 EUR/MWh)
+    - Alcune ore a prezzo ZERO (eccesso rinnovabili sulla rete)
+    - Riduzione media prezzi del 62% rispetto alla crisi 2022
+
+================================================================================
+                    RISULTATI EFFETTIVI TEST 2025
+================================================================================
+
+STATISTICHE PUN 2025 (dati reali GME):
+    Minimo:           0.00 EUR/MWh (alcune ore a prezzo zero - eccesso RES)
+    Massimo:        289.00 EUR/MWh (picchi limitati rispetto al 2022)
+    Media:          115.91 EUR/MWh
+    Mediana:        114.94 EUR/MWh
+    Deviazione Std:  29.65 EUR/MWh (mercato stabile)
+
+ORE CON PUN SOPRA SOGLIE CHIAVE:
+    PUN > F1 (164.14):   377 ore ( 4.3%) - export conveniente in F1
+    PUN > F2 (153.02):   733 ore ( 8.3%) - export conveniente in F2
+    PUN > F3 (136.01): 1,813 ore (20.6%) - export conveniente in F3
+    PUN > DG (233.00):    47 ore ( 0.5%) - DG conveniente rispetto a export
+
+================================================================================
+                    RISULTATI MPC 2025
+================================================================================
+
+SCENARIO cf=0.14 (base 2025):
+    Import totale:  47,032.62 MWh
+    Export totale:  11,043.51 MWh
+    DG totale:          47.55 MWh
+    ELY totale:         93.78 MWh
+    FC totale:          39.39 MWh
+    Ore con DG:            10 ore
+    Ore con Export:     1,042 ore (16% del tempo)
+
+SCENARIO cf=0.20 (alternativo):
+    Import totale:  47,032.87 MWh
+    Export totale:  10,996.21 MWh
+    DG totale:           0.00 MWh (mai usato - troppo costoso)
+    ELY totale:         93.78 MWh
+    FC totale:          39.39 MWh
+
+================================================================================
+                    ANALISI COMPORTAMENTO 2025
+================================================================================
+
+NOTA IMPORTANTE SUL MODELLO:
+    Il modello MPC corretto NON permette import+export simultaneo.
+    Import ed Export sono mutuamente esclusivi (vincolo fisico realistico).
+    L'export avviene SOLO quando c'e' surplus RES (non arbitraggio puro).
+
+OSSERVAZIONI CHIAVE:
+    1. PUN 2025 piu' stabile del 2022 (Std Dev 30 vs 133 EUR/MWh)
+    2. Alcune ore a prezzo ZERO (eccesso rinnovabili sulla rete)
+    3. Prezzi medi ridotti del 62% rispetto alla crisi 2022
+
+COMPORTAMENTO DEL SISTEMA:
+    1. EXPORT DA SURPLUS RES: Quando PV + Wind > Load, si vende al PUN
+       L'export avviene solo con surplus rinnovabili, non da import
+
+    2. DG QUASI MAI USATO: Con cf=0.14, DG costa 233 EUR/MWh
+       Usato solo quando serve potenza extra e PUN > 233 EUR/MWh
+       Con cf=0.20, DG costa 333 EUR/MWh -> MAI usato
+
+    3. H2 SYSTEM: Stocca surplus RES per uso successivo
+       ELY: 93.78 MWh caricati (solo da surplus RES)
+       FC: 39.39 MWh rilasciati
+       Efficienza round-trip: 42% (70% ELY x 60% FC)
+       Cicli equivalenti: ~4 cicli/anno
+
+CONFRONTO CON 2022:
+    - Export 2025: inferiore al 2022 (no arbitraggio simultaneo)
+    - DG 2025: 47.55 MWh (molto ridotto - costo DG basso ma PUN piu' basso)
+    - Costi totali: significativamente inferiori grazie ai prezzi bassi
+
+================================================================================
+                    FILE E COMANDI
+================================================================================
+
+FILE:
+    PUN 2025 (Excel):    20250101_20260101_PUN.xlsx
+    PUN 2025 (MAT):      PUN_2025.mat (generato da convert_pun.py)
+    Config:              system_2025.yaml
+    Output:              outputs_2025/
+
+COMANDI:
+    1. Converti PUN:     python convert_pun.py
+    2. Esegui test:      python run_test_2025.py
+
+================================================================================
+                    FONTI
+================================================================================
+
+- ARERA: https://www.arera.it/consumatori/valori-della-materia-energia-per-il-servizio-a-tutele-graduali
+- GME: https://www.mercatoelettrico.org
+- Prezzi gasolio: https://www.rivaluta.it/prezzi/prezzi-gasolio_riscaldamento-italia.asp
+
+================================================================================

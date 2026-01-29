@@ -1,18 +1,20 @@
-# Sistema Energetico Integrato con Idrogeno - MPC
+# Sistema Energetico Integrato con Idrogeno (MPC)
 
 Sistema di ottimizzazione energetica basato su **Model Predictive Control (MPC)** per un distretto industriale con fonti rinnovabili, storage a idrogeno e scambio bidirezionale con la rete.
 
 ---
 
-## Descrizione del progetto
+## Panoramica
 
-Il sistema ottimizza ora per ora le decisioni energetiche per:
-- **Minimizzare i costi** di approvvigionamento energetico
-- **Massimizzare i ricavi** dalla vendita di energia
-- **Soddisfare sempre il carico** elettrico
-- **Minimizzare il curtailment** delle rinnovabili
+- Ottimizzazione oraria con strategia **receding horizon** (passo 1h, orizzonte 24h).
+- Modello **MILP** con vincoli minimi tecnici e mutua esclusione import/export.
+- Dati 2022 (PUN 2022) + scenario test 2025 (PUN 2025 e tariffe ARERA aggiornate).
+- Report e grafici basati sulle **serie forecast** (coerenti con l'MPC).
+- Output pronti per analisi comparativa 2022 vs 2025.
 
-### Schema del sistema
+---
+
+## Schema del sistema
 
 ```
                     +------------------+
@@ -34,7 +36,7 @@ Il sistema ottimizza ora per ora le decisioni energetiche per:
                +------+      |    +-------------+
                | LOAD |      |    | Elettroliz. |
                | 20MW |      |    |    7MW      |
-               +------+      |    +------+------+
+               +------+      |    +------^------+
                              |           |
                              |    +------v------+
                              |    | Storage H2  |
@@ -44,67 +46,104 @@ Il sistema ottimizza ora per ora le decisioni energetiche per:
 
 ---
 
-## Risultati principali
+## Dati e scenari
 
-| Metrica | cf=0.45 | cf=0.60 |
-|---------|--------:|--------:|
+**Scenario 2022 (baseline)**
+- RES e load da `data/res_1_year_pu.mat` e `data/buildings_load.mat`.
+- PUN 2022 da `data/PUN_2022.mat`.
+- Config: `configs/system.yaml`.
+
+**Scenario 2025 (test)**
+- Stessi profili RES/load del 2022.
+- PUN 2025 da `test_2025/PUN_2025.mat`.
+- Tariffe ARERA e costi combustibile 2025 in `test_2025/system_2025.yaml`.
+
+**Periodo simulato:** 6,528 ore (~272 giorni), coerente con l'intersezione dei dati di carico.
+
+---
+
+## Risultati principali (forecast, output presenti nel repo)
+
+| Metrica | 2022 cf=0.45 | 2025 cf=0.14 |
+|---------|------------:|------------:|
 | Ore simulate | 6,528 | 6,528 |
-| Costo netto | 17,527,353 EUR | 17,533,477 EUR |
-| Costo per MWh | 367.83 EUR | 367.96 EUR |
-| Energia DG | 128.76 MWh | **0 MWh** |
-| Ore con DG attivo | 39 | **0** |
+| Costo netto | 18,361,900 EUR | 5,400,369 EUR |
+| Costo medio | 385.34 EUR/MWh | 113.33 EUR/MWh |
+| Energia import | 36,568.61 MWh | 36,587.74 MWh |
+| Energia export | 518.76 MWh | 547.89 MWh |
+| Energia DG | 0.00 MWh | 0.00 MWh |
 
-**Conclusione**: Il DG conviene solo per arbitraggio quando PUN > 750 EUR/MWh. Con cf=0.60 non viene mai usato.
+Dettagli completi: `outputs/tabella_comparativa_2022_2025.txt`.
 
 ---
 
 ## Quick Start
 
-### 1. Installazione
+### 1) Installazione
 
 ```bash
-# Clona il repository
-git clone <repo-url>
-cd Elettric_system
-
-# Crea ambiente virtuale
 python -m venv .venv
 .venv\Scripts\activate  # Windows
 # source .venv/bin/activate  # Linux/Mac
-
-# Installa dipendenze
 pip install -r requirements.txt
 ```
 
-### 2. Esegui simulazione MPC
+### 2) MPC 2022 (scenari cf=0.45 e cf=0.60)
 
 ```bash
-# Esegue MPC rolling horizon per entrambi gli scenari (cf=0.45 e cf=0.60)
-python src/run_mpc_full.py --horizon 24 --fuel-values 0.45,0.60
+python src/run_mpc_full.py --horizon 24 --fuel-values 0.45,0.60 --out outputs/mpc_2022.csv
 ```
 
 Output:
-- `outputs/mpc_receding_cf045.csv` - Schedule orario (cf=0.45)
-- `outputs/mpc_receding_cf060.csv` - Schedule orario (cf=0.60)
+- `outputs/mpc_2022_cf045.csv`
+- `outputs/mpc_2022_cf060.csv`
 
-### 3. Genera report
-
-```bash
-# Report con metriche aggregate
-python src/report.py --schedule outputs/mpc_receding_cf045.csv --out outputs/report_cf045.csv --fuel-cost 0.45 --plots
-
-python src/report.py --schedule outputs/mpc_receding_cf060.csv --out outputs/report_cf060.csv --fuel-cost 0.60
-```
-
-### 4. Genera grafici dettagliati
+### 3) Report + grafici base
 
 ```bash
-# Grafici per la prima settimana
-python src/plot_results.py --hours 168 --start 0
-
-# Grafici per periodi specifici (Gennaio, Luglio, Ottobre)
-python src/plot_results.py --all-periods
+python src/report.py --schedule outputs/mpc_2022_cf045.csv --out outputs/report_2022_cf045.csv --fuel-cost 0.45 --plots
+python src/report.py --schedule outputs/mpc_2022_cf060.csv --out outputs/report_2022_cf060.csv --fuel-cost 0.60 --plots
 ```
+
+Grafici in `outputs/plots/`:
+`load_renewables.png`, `grid_dg.png`, `hydrogen.png`, `prices.png`.
+
+### 4) Grafici avanzati (presentazioni)
+
+```bash
+python src/plot_results.py --schedule-45 outputs/mpc_2022_cf045.csv --schedule-60 outputs/mpc_2022_cf060.csv --hours 168 --start 0 --scenario both
+```
+
+### 5) Scenario 2025
+
+```bash
+# Se serve rigenerare il MAT dal file Excel
+python test_2025/convert_pun.py
+
+# Esegue gli scenari 2025 (24h + full) -> genera file *_24h e *_full
+python test_2025/run_test_2025.py
+```
+
+Output consolidati per confronto (presenti nel repo):
+- `test_2025/outputs_2025/mpc_2025_cf014.csv`
+- `test_2025/outputs_2025/mpc_2025_cf020.csv`
+
+### 6) Confronto 2022 vs 2025 (tabella + plot)
+
+```bash
+python generate_comparison_table.py > outputs/tabella_comparativa_2022_2025.txt
+python create_all_plots.py
+```
+
+---
+
+## Output principali
+
+- Scheduling MPC 2022: `outputs/mpc_2022_cf045.csv`, `outputs/mpc_2022_cf060.csv`
+- Scheduling MPC 2025: `test_2025/outputs_2025/mpc_2025_cf014.csv`, `test_2025/outputs_2025/mpc_2025_cf020.csv`
+- Tabella comparativa: `outputs/tabella_comparativa_2022_2025.txt`
+- Grafici comparativi e di sistema: `outputs/plots/*.png`
+- Output storici: `outputs/vecchi/` e `test_2025/outputs_2025/vecchi/`
 
 ---
 
@@ -112,174 +151,72 @@ python src/plot_results.py --all-periods
 
 ```
 Elettric_system/
-├── configs/
-│   └── system.yaml           # Parametri del sistema (potenze, efficienze, prezzi)
-│
-├── data/
-│   ├── buildings_load.mat    # Profilo di carico (6552 ore)
-│   ├── PUN_2022.mat          # Prezzi PUN orari
-│   ├── res_1_year_pu.mat     # Profili PV e Wind in p.u.
-│   └── Projects.pdf          # Traccia del progetto
-│
-├── src/
-│   ├── model.py              # Modello MPC/MILP (variabili, vincoli, obiettivo)
-│   ├── run_mpc_full.py       # Loop MPC rolling horizon
-│   ├── loader.py             # Caricamento dati da .mat
-│   ├── tariff.py             # Tariffe ARERA (F1/F2/F3)
-│   ├── report.py             # Generazione report e grafici base
-│   └── plot_results.py       # Grafici dettagliati
-│
-├── outputs/
-│   ├── mpc_receding_cf045.csv
-│   ├── mpc_receding_cf060.csv
-│   ├── DECISIONI_ORA_PER_ORA.csv
-│   ├── report_cf045.csv
-│   ├── report_cf060.csv
-│   └── plots/
-│
-├── REPORT_FINALE.md          # Report completo con analisi
-├── README.md                 # Questo file
-└── requirements.txt          # Dipendenze Python
+|-- configs/
+|   |-- system.yaml               # Parametri sistema 2022 (potenze, efficienze, prezzi)
+|-- data/
+|   |-- buildings_load.mat        # Profilo di carico
+|   |-- PUN_2022.mat               # Prezzi PUN 2022
+|   |-- res_1_year_pu.mat          # Profili PV/Wind (forecast + actual)
+|-- src/
+|   |-- model.py                   # Modello MPC/MILP
+|   |-- run_mpc_full.py            # MPC receding horizon
+|   |-- loader.py                  # Caricamento dati + tariffe
+|   |-- tariff.py                  # Fasce ARERA
+|   |-- report.py                  # KPI + grafici base
+|   |-- plot_results.py            # Grafici avanzati
+|-- test_2025/
+|   |-- system_2025.yaml           # Config 2025 (tariffe e fuel aggiornati)
+|   |-- PUN_2025.mat               # Prezzi PUN 2025
+|   |-- run_test_2025.py           # MPC 2025
+|   |-- outputs_2025/              # Output scenario 2025
+|-- outputs/
+|   |-- mpc_2022_cf045.csv
+|   |-- mpc_2022_cf060.csv
+|   |-- tabella_comparativa_2022_2025.txt
+|   |-- plots/
+|   |-- vecchi/                    # Output legacy
+|-- create_all_plots.py            # Plot comparativi 2022 vs 2025
+|-- generate_comparison_table.py   # Tabella comparativa completa
+|-- REPORT_FINALE.md               # Report completo
+|-- GUIDA_PROGETTO.md              # Guida sintetica del progetto
+|-- requirements.txt
 ```
 
 ---
 
-## Parametri del sistema
+## Parametri di sistema (fisici)
 
 | Componente | Parametro | Valore |
 |------------|-----------|--------|
-| **PV** | Potenza nominale | 4.0 MW |
-| **Wind** | Potenza nominale | 11.34 MW |
-| **Load** | Potenza nominale | 20.0 MW |
-| **Grid Import** | Potenza massima | 20.0 MW |
-| **Grid Export** | Potenza massima | 16.0 MW |
-| **Elettrolizzatore** | Nominale / Minimo | 7.0 / 0.7 MW |
-| **Elettrolizzatore** | Efficienza | 70% |
-| **Fuel Cell** | Nominale / Minimo | 7.0 / 0.7 MW |
-| **Fuel Cell** | Efficienza | 60% |
-| **Storage H2** | Capacita | 12.0 MWh |
-| **Diesel Generator** | Nominale / Minimo | 5.0 / 1.0 MW |
-| **Diesel Generator** | Efficienza | 60% |
+| PV | Potenza nominale | 4.0 MW |
+| Wind | Potenza nominale | 11.34 MW |
+| Load | Potenza nominale | 20.0 MW |
+| Grid Import | Potenza massima | 20.0 MW |
+| Grid Export | Potenza massima | 16.0 MW |
+| Elettrolizzatore | Nominale / Minimo | 7.0 / 0.7 MW |
+| Elettrolizzatore | Efficienza | 70% |
+| Fuel Cell | Nominale / Minimo | 7.0 / 0.7 MW |
+| Fuel Cell | Efficienza | 60% |
+| Storage H2 | Capacita | 12.0 MWh |
+| Diesel Generator | Nominale / Minimo | 5.0 / 1.0 MW |
+| Diesel Generator | Efficienza | 60% |
 
 ---
 
-## Metodologia MPC
+## Note di modello
 
-### Rolling Horizon (4 step)
-
-```
-Per ogni ora t:
-  1. RACCOGLI previsioni (PV, Wind, Load, Prezzi) per t → t+24
-  2. RISOLVI ottimizzazione MILP su orizzonte 24h
-  3. APPLICA solo la decisione per l'ora t
-  4. AVANZA a t+1 e ripeti
-```
-
-### Bilancio energetico
-
-```
-P_pv + P_wind + P_import + P_dg + P_fc = P_load + P_ely + P_export + P_curt
-```
-
-### Funzione obiettivo
-
-```
-min: sum( c_import * P_import - PUN * P_export + (c_fuel/eta_dg) * P_dg + lambda * P_curt )
-```
-
----
-
-## File di output
-
-### DECISIONI_ORA_PER_ORA.csv
-
-Contiene per ogni ora le decisioni ottimali:
-
-| Colonna | Descrizione |
-|---------|-------------|
-| datetime | Data e ora |
-| load_MW | Carico da soddisfare |
-| pv_MW, wind_MW | Produzione rinnovabili |
-| cf045_import_MW | Import dalla rete (cf=0.45) |
-| cf045_export_MW | Export alla rete (cf=0.45) |
-| cf045_DG_MW | Potenza diesel (cf=0.45) |
-| cf045_ELY_MW | Potenza elettrolizzatore |
-| cf045_FC_MW | Potenza fuel cell |
-| cf045_H2_SOC_MWh | Stato storage H2 |
-| cf060_* | Stessi campi per cf=0.60 |
-
-### Come leggere le decisioni
-
-```
-SE import_MW > 0    -> Compra dalla rete
-SE export_MW > 0    -> Vendi alla rete
-SE DG_MW > 0        -> Accendi il diesel
-SE ELY_MW > 0       -> Carica storage H2
-SE FC_MW > 0        -> Scarica storage H2
-```
-
----
-
-## Tariffe energia
-
-### Import (ARERA)
-
-| Fascia | Orario | Prezzo |
-|--------|--------|--------|
-| F1 | Lun-Ven 08-19 | 532.76 EUR/MWh |
-| F2 | Lun-Ven 07-08, 19-23; Sab 07-23 | 548.58 EUR/MWh |
-| F3 | Notti, Dom, Festivi | 468.68 EUR/MWh |
-
-### Export (PUN)
-
-- Prezzo variabile ora per ora (10-870 EUR/MWh)
-- Media 2022: ~324 EUR/MWh
-
-### Costo DG
-
-| cf | Costo carburante | Costo elettrico |
-|----|------------------|-----------------|
-| 0.45 | 0.45 EUR/kWh | 750 EUR/MWh |
-| 0.60 | 0.60 EUR/kWh | 1000 EUR/MWh |
-
----
-
-## Solver
-
-Il modello usa **MILP** (Mixed Integer Linear Programming) per gestire i vincoli di potenza minima.
-
-### Solver supportati
-
-1. **CBC** (consigliato) - via PuLP o CVXPY
-2. **ECOS_BB** - fallback se CBC non disponibile
-
-### Installazione CBC (opzionale, migliora performance)
-
-```bash
-# Con conda
-conda install -c conda-forge coincbc
-
-# Verifica
-python -c "import shutil; print(shutil.which('cbc'))"
-```
+- Bilancio energetico: `PV + Wind + Import + DG + FC = Load + ELY + Export + Curtailment`.
+- SOC H2: `soc(t+1)=soc(t)+dt*(eta_ely*p_ely - p_fc/eta_fc)`.
+- Import ed export sono mutuamente esclusivi (vincolo binario).
+- Report e grafici usano **serie forecast** per coerenza con l'ottimizzazione MPC.
 
 ---
 
 ## Documentazione
 
-- **[REPORT_FINALE.md](REPORT_FINALE.md)** - Report completo con:
-  - Analisi dettagliata dei risultati
-  - Spiegazione arbitraggio e strategie
-  - Guida per estendere il modello
-  - Teoria MPC per l'esame
-  - Domande frequenti
-  - Glossario dei termini
-
----
-
-## Autori
-
-Progetto sviluppato per il corso di Innovazione - UCBM
+- `REPORT_FINALE.md` (analisi completa)
+- `GUIDA_PROGETTO.md` (guida sintetica)
+- `Sistema-Energetico-Integrato-con-Idrogeno.pdf` (relazione estesa)
 
 ---
 
